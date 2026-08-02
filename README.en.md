@@ -157,4 +157,4 @@ agentic-agile-343-community-ed/
 - WeChat: `iloveagile` · Email: 3433839@qq.com
 - Advanced courses: *Agentic Agile / 智能体敏捷: AI-Era R&D Governance Sandbox Bootcamp* and others (contact 无敌哥)
 
-> The toolset is fully open source, but between "can use" and "use well" lies systematic learning and enterprise-scenario coaching — that is exactly where courses and in-house training add value. Resonate with the philosophy? Sign the *Agentic Agile Manifesto* on the official site and join the pioneer community.
+>  Resonate with the philosophy? Sign the *Agentic Agile Manifesto* on the official site and join the pioneer community.
