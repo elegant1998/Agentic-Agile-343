@@ -9,6 +9,7 @@
 
 - 📘 Methodology whitepaper: [`docs/whitepaper/`](docs/whitepaper/) (CC BY 4.0 — free to share with attribution)
 - 🌐 Official site: <http://agentic.iloveagile.me/about>
+- 📦 GitHub repo: <https://github.com/elegant1998/Agentic-Agile-343.git> (manual install: `git clone https://github.com/elegant1998/Agentic-Agile-343.git`)
 - 🎓 Advanced courses & in-house training: WeChat `iloveagile` (note "Agentic Agile")
 - ✍️ Author: Wang Lijie (无敌哥), AI Governance Architect
 - 🤝 Contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md) ([English](CONTRIBUTING.en.md)) · 📦 Release Notes: [`RELEASE_NOTES.md`](RELEASE_NOTES.md) ([English](RELEASE_NOTES.en.md))

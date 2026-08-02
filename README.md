@@ -7,6 +7,7 @@
 
 - 📘 方法论白皮书：[`docs/whitepaper/`](docs/whitepaper/)（CC BY 4.0，保留署名可自由传播）
 - 🌐 官网：<http://agentic.iloveagile.me/about>
+- 📦 GitHub 仓库：<https://github.com/elegant1998/Agentic-Agile-343.git>（手动安装：`git clone https://github.com/elegant1998/Agentic-Agile-343.git`）
 - 🎓 进阶课程与内训：微信 `iloveagile`（备注「智能体敏捷」）
 - ✍️ 作者：王立杰（无敌哥），AI 治理架构师
 - 🤝 贡献指南：[`CONTRIBUTING.md`](CONTRIBUTING.md)（[English](CONTRIBUTING.en.md)）· 📦 发布说明：[`RELEASE_NOTES.md`](RELEASE_NOTES.md)（[English](RELEASE_NOTES.en.md)）· 🌐 [English README](README.en.md)
