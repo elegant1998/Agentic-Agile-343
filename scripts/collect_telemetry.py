@@ -1,0 +1,1310 @@
+#!/usr/bin/env python3
+"""Agentic Agile 343 — 算力与价值遥测收集器 v2.0
+
+4 层 9 维遥测模型：
+  Layer 1 — 价值层：目标准确率、首次成功率、复合 ROI
+  Layer 2 — 能力层：约束自愈率、HITL 升级率
+  Layer 3 — 效率层：上下文压缩比、Token 效率
+  Layer 4 — 进化层：知识沉淀率
+
+用法:
+    python scripts/collect_telemetry.py \
+        --project "my-project" \
+        --test-total 42 --test-passed 42 \
+        --coverage-pct 93.0 --coverage-threshold 90.0 \
+        --bench-p95 0.0067 --bench-threshold 2.0 \
+        --token-usage 45000 --execution-rounds 6 --hitl-count 2 \
+        --gates-passed 5 --must-constraints 20 --must-failed 0 \
+        --tasks-assigned 10 --tasks-completed 9 --tasks-first-pass 7 \
+        --auto-healed 3 --constraint-failures-total 5 \
+        --human-hourly-rate 500 --hours-saved-per-task 2.0 \
+        --ai-monthly-cost 50000 \
+        --context-input-tokens 8000 --context-output-tokens 1500 \
+        --new-patterns 3 --total-patterns 12 \
+        --output telemetry.json
+
+退出码: 0 = 成功, 1 = 采集失败
+"""
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+# ── 从 dashboard.py / certificate.py 导入（v1.15 拆分）──
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+try:
+    from dashboard import find_dashboard_template as _find_dashboard_template
+    from dashboard import write_static_dashboard
+    from dashboard import summarize_for_index as _summarize_for_index
+    from certificate import calc_certificate_eligibility as _calc_certificate_eligibility
+except ImportError:
+    pass  # 模块不可用时降级为内联定义（见下方）
+
+
+
+# ─── 分层遥测模型 ──────────────────────────────────────────
+
+def collect(args):
+    """采集全部 4 层遥测指标"""
+    now = datetime.now(timezone.utc).isoformat()
+    task_id = _normalize_task_id(getattr(args, "task", None) or getattr(args, "module_id", None))
+    # contract = 单次意图契约；project = 项目累积（默认：有 --task 则为 contract）
+    scope = getattr(args, "scope", None) or ("contract" if task_id else "project")
+
+    # 约束矩阵 → 门禁/测试：消费 harness 执行结果（不再手工判定，从源头解决）
+    _wire_matrix(args, task_id)
+
+    # ── Layer 1: 价值层 ──
+    value_layer = _collect_value_layer(args)
+
+    # ── Layer 2: 能力层 ──
+    capability_layer = _collect_capability_layer(args)
+
+    # ── Layer 3: 效率层 ──
+    efficiency_layer = _collect_efficiency_layer(args)
+
+    # ── Layer 4: 进化层 ──
+    evolution_layer = _collect_evolution_layer(args)
+
+    # ── 兼容旧版字段 ──
+    pipeline = _collect_pipeline(args)
+    quality = _collect_quality(args)
+    performance = _collect_performance(args)
+    cost = _collect_cost(args)
+    governance = _collect_governance(args)
+
+    # ── 项目自治成熟度证书资格（仅 L3/L4 可申请）──
+    certificate_eligibility = _calc_certificate_eligibility(
+        value_layer, capability_layer
+    )
+
+    return {
+        "meta": {
+            "collected_at": now,
+            "project": args.project or "UNKNOWN",
+            "version": "2.2",
+            "model": "4-layer-9-dim",
+            "scope": scope,  # contract | project
+            "task_id": task_id,  # e.g. T-018；project 级为 null
+            "module_id": getattr(args, "module_id", None),
+            "tool": getattr(args, "tool", "workbuddy"),
+            # 双向链接字段（落盘时再补全路径）
+            "links": {
+                "project_telemetry": "telemetry.json",
+                "contract_telemetry": None,
+                "dashboard_project": "dashboard.html",
+                "dashboard_contract": None,
+            },
+        },
+        # 新分层
+        "value": value_layer,
+        "capability": capability_layer,
+        "efficiency": efficiency_layer,
+        "evolution": evolution_layer,
+        # 项目自治成熟度证书资格
+        "certificate_eligibility": certificate_eligibility,
+        # 兼容旧版
+        "pipeline": pipeline,
+        "quality": quality,
+        "performance": performance,
+        "cost": cost,
+        "governance": governance,
+        # 项目累积时保留 runs 索引（单次为空）
+        "runs": [],
+    }
+
+
+
+# _calc_certificate_eligibility → moved to certificate.py
+
+
+
+def _normalize_task_id(raw):
+    if not raw:
+        return None
+    s = str(raw).strip().upper()
+    if not s:
+        return None
+    if s.startswith("T-"):
+        return s
+    if s.startswith("T") and s[1:].isdigit():
+        return f"T-{s[1:]}"
+    if s.isdigit():
+        return f"T-{s}"
+    return s
+
+
+def _write_json(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+def _load_json(path: Path):
+    if not path.is_file():
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+# _find_dashboard_template → moved to dashboard.py
+
+
+
+# write_static_dashboard → moved to dashboard.py
+
+
+
+# _summarize_for_index → moved to dashboard.py
+
+
+
+def _read_run_file(project_dir: Path, file_rel: str | None) -> dict | None:
+    """按 runs 摘要中的相对路径读取单次契约 run 文件。"""
+    if not file_rel:
+        return None
+    p = project_dir / file_rel
+    return _load_json(p)
+
+
+def _accumulate_runs_raw(project_dir: Path, run_summaries: list, latest_contract: dict) -> dict:
+    """跨所有契约 run 文件累加原始计数，用于项目级累计遥测。
+
+    关键修正：旧版把最近一次契约的快照当作项目级分层字段，导致
+    tasks=1 / first_pass=0% 这类「单契约快照」被误读为「项目累计」。
+    这里改为读取每个 run 文件的原始计数并累加，得到真正的项目累计。
+    """
+    raw = {
+        "tasks_assigned": 0,
+        "tasks_completed": 0,
+        "tasks_first_pass": 0,
+        "auto_healed": 0,
+        "constraint_failures_total": 0,
+        "must_passed": 0,
+        "must_total": 0,
+        "hitl_count": 0,
+        "execution_rounds": 0,
+        "token_usage": 0,
+        "new_patterns": 0,
+    }
+    token_sources = set()
+    total_patterns = 0
+    for r in run_summaries:
+        d = _read_run_file(project_dir, r.get("file"))
+        if not d:
+            continue
+        v = d.get("value", {})
+        c = d.get("capability", {})
+        ev = d.get("evolution", {})
+        ga = v.get("goal_accuracy", {})
+        fp = v.get("first_pass_rate", {})
+        ah = c.get("auto_heal_rate", {})
+        mp = c.get("must_pass_rate", {})
+        he = c.get("hitl_escalation_rate", {})
+        kc = ev.get("knowledge_crystallization", {})
+        raw["tasks_assigned"] += int(ga.get("tasks_assigned", 0) or 0)
+        raw["tasks_completed"] += int(ga.get("tasks_completed", 0) or 0)
+        raw["tasks_first_pass"] += int(fp.get("tasks_first_pass", 0) or 0)
+        raw["auto_healed"] += int(ah.get("auto_healed", 0) or 0)
+        raw["constraint_failures_total"] += int(ah.get("failures_total", 0) or 0)
+        raw["must_passed"] += int(mp.get("must_passed", 0) or 0)
+        raw["must_total"] += int(mp.get("must_total", 0) or 0)
+        raw["hitl_count"] += int(he.get("hitl_count", 0) or 0)
+        raw["execution_rounds"] += int(he.get("execution_rounds", 0) or 0)
+        raw["token_usage"] += int((d.get("cost") or {}).get("token_usage", 0) or 0)
+        token_sources.add(str((d.get("cost") or {}).get("token_source", "estimated")))
+        raw["new_patterns"] += int(kc.get("new_patterns_this_cycle", 0) or 0)
+        # total_patterns 为项目累积快照（最新契约已含历史），取最大值
+        tp = int(kc.get("total_patterns_accumulated", 0) or 0)
+        if tp > total_patterns:
+            total_patterns = tp
+    # 以最新契约快照中的 total_patterns 为准（已是累积值）
+    latest_tp = int(
+        (latest_contract.get("evolution", {}).get("knowledge_crystallization", {}) or {}).get(
+            "total_patterns_accumulated", 0
+        )
+        or 0
+    )
+    if latest_tp > total_patterns:
+        total_patterns = latest_tp
+    raw["total_patterns"] = total_patterns
+    measured = {s for s in token_sources if s.startswith("measured")}
+    if measured and len(measured) == len(token_sources):
+        raw["token_source"] = "measured:ocusage"
+    elif measured:
+        raw["token_source"] = "mixed(measured+estimated)"
+    else:
+        raw["token_source"] = "estimated"
+    return raw
+
+
+class _RawArgs:
+    """用跨契约累计原始计数构造伪 args，复用现有分层采集函数。"""
+
+    def __init__(self, raw: dict):
+        self.tasks_assigned = raw["tasks_assigned"]
+        self.tasks_completed = raw["tasks_completed"]
+        self.tasks_first_pass = raw["tasks_first_pass"]
+        self.auto_healed = raw["auto_healed"]
+        self.constraint_failures_total = raw["constraint_failures_total"]
+        self.must_constraints = raw["must_total"]
+        self.must_failed = max(0, raw["must_total"] - raw["must_passed"])
+        self.hitl_count = raw["hitl_count"]
+        self.execution_rounds = raw["execution_rounds"]
+        self.token_usage = raw["token_usage"]
+        self.new_patterns = raw["new_patterns"]
+        self.total_patterns = raw["total_patterns"]
+        # ROI 与上下文压缩未跨契约追踪 → 置 0（INSUFFICIENT_DATA / ROOM_FOR_IMPROVEMENT）
+        self.human_hourly_rate = 0.0
+        self.hours_saved_per_task = 0.0
+        self.ai_monthly_cost = 0.0
+        self.context_input_tokens = 0
+        self.context_output_tokens = 0
+
+
+def _aggregate_project_from_runs(
+    project: str, run_summaries: list, latest_contract: dict | None, project_dir: Path
+) -> dict:
+    """从历史 runs 累加原始计数，拼出项目级累计遥测。
+
+    value / capability / efficiency / evolution 分层字段为**所有契约 run 的
+    跨契约累计聚合**（修正旧版「取最近一次快照」导致 tasks=1 的偏差）；
+    runs 为完整历史索引。
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    latest = latest_contract or {
+        "meta": {},
+        "value": {},
+        "capability": {},
+        "efficiency": {},
+        "evolution": {},
+        "pipeline": {},
+        "quality": {},
+        "performance": {},
+        "cost": {},
+        "governance": {},
+    }
+    raw = _accumulate_runs_raw(project_dir, run_summaries, latest)
+    fake = _RawArgs(raw)
+    value_layer = _collect_value_layer(fake)
+    capability_layer = _collect_capability_layer(fake)
+    efficiency_layer = _collect_efficiency_layer(fake)
+    evolution_layer = _collect_evolution_layer(fake)
+    certificate_eligibility = _calc_certificate_eligibility(value_layer, capability_layer)
+
+    n = len(run_summaries)
+    agg = {
+        "meta": {
+            "collected_at": now,
+            "project": project or (latest.get("meta") or {}).get("project") or "UNKNOWN",
+            "version": "2.2",
+            "model": "4-layer-9-dim",
+            "scope": "project",
+            "task_id": None,
+            "run_count": n,
+            "links": {
+                "project_telemetry": "telemetry.json",
+                "contract_telemetry": None,
+                "dashboard_project": "dashboard.html",
+                "dashboard_contract": None,
+            },
+        },
+        "value": value_layer,
+        "capability": capability_layer,
+        "efficiency": efficiency_layer,
+        "evolution": evolution_layer,
+        "certificate_eligibility": certificate_eligibility,
+        "pipeline": latest.get("pipeline") or {},
+        "quality": latest.get("quality") or {},
+        "performance": latest.get("performance") or {},
+        "cost": {
+            "token_usage": raw["token_usage"],
+            "token_source": raw.get("token_source", "estimated"),
+            "execution_rounds": raw["execution_rounds"],
+            "hitl_count": raw["hitl_count"],
+            "hitl_rate": _safe_ratio(raw["hitl_count"], max(raw["execution_rounds"], 1)),
+            "estimated_cost_usd": round(raw["token_usage"] * 0.000002, 4),
+        },
+        "governance": latest.get("governance") or {},
+        "runs": run_summaries,
+        "aggregate": {
+            "contracts_recorded": n,
+            "task_ids": [r.get("task_id") for r in run_summaries if r.get("task_id")],
+            "contracts_completed": sum(1 for r in run_summaries if r.get("task_id")),
+            "note": "value/capability/efficiency/evolution 分层字段为所有契约 run 的跨契约累计聚合；runs 为完整历史索引",
+            "raw_accumulated": raw,
+        },
+    }
+    return agg
+
+
+def persist_telemetry(args, telemetry: dict) -> dict:
+    """
+    双轨落盘：
+    - 单次意图契约: governance/telemetry/runs/telemetry-T-XXX.json
+    - 项目累积:     governance/telemetry.json（含 runs[] 链接）
+    默认 --output 仍写项目累积；有 --task 时额外写单次并回写双方 links。
+    """
+    out = Path(args.output)
+    # 约定：项目累积默认路径
+    if out.name == "telemetry.json" or not getattr(args, "task", None):
+        project_path = out if out.suffix == ".json" else out / "telemetry.json"
+    else:
+        project_path = out.parent / "telemetry.json" if out.parent.name != "runs" else out.parent.parent / "telemetry.json"
+
+    # 若用户把 output 指到 runs 下，纠正 project 路径
+    if project_path.parent.name == "runs":
+        project_path = project_path.parent.parent / "telemetry.json"
+
+    task_id = telemetry["meta"].get("task_id")
+    scope = telemetry["meta"].get("scope") or "project"
+
+    contract_path = None
+    if task_id and scope == "contract":
+        runs_dir = project_path.parent / "telemetry" / "runs"
+        contract_path = runs_dir / f"telemetry-{task_id}.json"
+        rel_contract = f"telemetry/runs/telemetry-{task_id}.json"
+        rel_project = "telemetry.json"
+        rel_dash_contract = f"dashboard-{task_id}.html"
+        telemetry["meta"]["links"] = {
+            "project_telemetry": rel_project,
+            "contract_telemetry": rel_contract,
+            "dashboard_project": "dashboard.html",
+            "dashboard_contract": rel_dash_contract,
+        }
+        telemetry["meta"]["scope"] = "contract"
+        telemetry["runs"] = []
+        _write_json(contract_path, telemetry)
+
+        # 更新项目累积：合并历史 runs
+        existing = _load_json(project_path) or {}
+        old_runs = list(existing.get("runs") or [])
+        # 去重同 task_id，新的覆盖旧的
+        old_runs = [r for r in old_runs if r.get("task_id") != task_id]
+        summary = _summarize_for_index(telemetry)
+        old_runs.append(summary)
+        # 按时间排序
+        old_runs.sort(key=lambda r: r.get("collected_at") or "")
+
+        project_tel = _aggregate_project_from_runs(
+            telemetry["meta"].get("project"),
+            old_runs,
+            telemetry,
+            project_path.parent,
+        )
+        project_tel["meta"]["links"]["project_telemetry"] = rel_project
+        project_tel["meta"]["links"]["latest_contract_telemetry"] = rel_contract
+        project_tel["meta"]["links"]["latest_dashboard_contract"] = rel_dash_contract
+        project_tel["meta"]["latest_task_id"] = task_id
+        _write_json(project_path, project_tel)
+
+        # 纯静态大屏：内嵌 JSON，双击 HTML 即可，无需 serve
+        gov_dir = project_path.parent
+        tpl = _find_dashboard_template()
+        dash_project = write_static_dashboard(gov_dir / "dashboard.html", project_tel, tpl)
+        dash_contract = write_static_dashboard(gov_dir / rel_dash_contract, telemetry, tpl)
+
+        # 若 --output 不是项目路径也不是契约路径，额外写一份用户指定文件
+        out_resolved = out.resolve()
+        if out_resolved != project_path.resolve() and (
+            not contract_path or out_resolved != contract_path.resolve()
+        ):
+            _write_json(out, telemetry)
+
+        return {
+            "contract_path": str(contract_path),
+            "project_path": str(project_path),
+            "dashboard_project": str(dash_project),
+            "dashboard_contract": str(dash_contract),
+            "telemetry": telemetry,
+            "project": project_tel,
+        }
+
+    # 纯项目级采集（无 --task）：优先从已有 runs 跨契约累加；无 runs 则保留本次快照
+    existing = _load_json(project_path) or {}
+    runs = existing.get("runs") or []
+    if runs:
+        base = existing
+        agg = _aggregate_project_from_runs(
+            telemetry["meta"].get("project") or (base.get("meta") or {}).get("project"),
+            runs,
+            base,
+            project_path.parent,
+        )
+        agg["meta"]["links"] = {
+            "project_telemetry": "telemetry.json",
+            "contract_telemetry": None,
+            "dashboard_project": "dashboard.html",
+            "dashboard_contract": None,
+            "latest_contract_telemetry": (base.get("meta") or {}).get("links", {}).get(
+                "latest_contract_telemetry"
+            ),
+            "latest_dashboard_contract": (base.get("meta") or {}).get("links", {}).get(
+                "latest_dashboard_contract"
+            ),
+        }
+        agg["meta"]["run_count"] = len(runs)
+        agg["meta"]["latest_task_id"] = (base.get("meta") or {}).get("latest_task_id")
+        _write_json(project_path, agg)
+        dash_project = write_static_dashboard(
+            project_path.parent / "dashboard.html",
+            agg,
+            _find_dashboard_template(),
+        )
+        return {
+            "contract_path": None,
+            "project_path": str(project_path),
+            "dashboard_project": str(dash_project),
+            "dashboard_contract": None,
+            "telemetry": agg,
+            "project": agg,
+        }
+    # 无历史 runs：直接写本次采集快照
+    telemetry["meta"]["scope"] = "project"
+    telemetry["meta"]["task_id"] = None
+    telemetry["meta"]["links"] = {
+        "project_telemetry": "telemetry.json",
+        "contract_telemetry": None,
+        "dashboard_project": "dashboard.html",
+        "dashboard_contract": None,
+    }
+    _write_json(project_path, telemetry)
+    dash_project = write_static_dashboard(
+        project_path.parent / "dashboard.html",
+        telemetry,
+        _find_dashboard_template(),
+    )
+    return {
+        "contract_path": None,
+        "project_path": str(project_path),
+        "dashboard_project": str(dash_project),
+        "dashboard_contract": None,
+        "telemetry": telemetry,
+        "project": telemetry,
+    }
+
+
+# ─── Layer 1: 价值层 — 回答"AI 创造多少价值" ──────────────
+
+def _collect_value_layer(args) -> dict:
+    tasks_assigned = max(args.tasks_assigned, 1)
+
+    # P0: 目标准确率
+    goal_accuracy = _safe_ratio(args.tasks_completed, tasks_assigned)
+
+    # P0: 首次成功率
+    first_pass_rate = _safe_ratio(args.tasks_first_pass, tasks_assigned)
+
+    # P1: 复合 ROI（含失败折现）
+    compound_roi = _calc_compound_roi(args)
+
+    # 目标准确率健康度
+    if goal_accuracy >= 0.80:
+        goal_health = "L3_READY"  # 适合 L3 受监督自主
+    elif goal_accuracy >= 0.60:
+        goal_health = "L2_COLLAB"  # 仍处于 L2 协作阶段
+    else:
+        goal_health = "NEEDS_IMPROVEMENT"  # 需优化 Prompt 策略
+
+    return {
+        "goal_accuracy": {
+            "value": round(goal_accuracy, 4),
+            "display": f"{goal_accuracy * 100:.1f}%",
+            "tasks_assigned": args.tasks_assigned,
+            "tasks_completed": args.tasks_completed,
+            "health": goal_health,
+            "threshold": {
+                "l3_ready": 0.80,
+                "l2_collab": 0.60,
+            },
+        },
+        "first_pass_rate": {
+            "value": round(first_pass_rate, 4),
+            "display": f"{first_pass_rate * 100:.1f}%",
+            "tasks_first_pass": args.tasks_first_pass,
+            "tasks_assigned": args.tasks_assigned,
+            "impact_note": (
+                "首次成功率从 60%→80% 可降低约 50% 单任务 Token 成本"
+                if first_pass_rate < 0.80 else "首次成功率处于健康水平"
+            ),
+        },
+        "compound_roi": compound_roi,
+    }
+
+
+def _calc_compound_roi(args) -> dict:
+    """P1: 带失败折现率的复合 ROI"""
+    if not args.human_hourly_rate or not args.hours_saved_per_task:
+        return {"status": "INSUFFICIENT_DATA", "detail": "缺少人力成本参数"}
+
+    tasks_completed = max(args.tasks_completed, 0)
+    tasks_assigned = max(args.tasks_assigned, 1)
+    failure_rate = 1.0 - _safe_ratio(tasks_completed, tasks_assigned)
+
+    # 节省的人力成本
+    saved_labor = tasks_completed * args.hours_saved_per_task * args.human_hourly_rate
+
+    # 失败折现
+    discounted_savings = saved_labor * (1.0 - failure_rate)
+
+    # AI 工具成本（月）
+    ai_cost = max(args.ai_monthly_cost, 1)
+
+    # 复合 ROI
+    roi_pct = ((discounted_savings - ai_cost) / ai_cost) * 100
+
+    return {
+        "value": round(roi_pct, 1),
+        "display": f"{roi_pct:.1f}%",
+        "breakdown": {
+            "saved_labor_raw": round(saved_labor, 2),
+            "failure_rate": round(failure_rate, 4),
+            "discounted_savings": round(discounted_savings, 2),
+            "ai_monthly_cost": ai_cost,
+        },
+        "formula": "((节省人力 × (1-失败率)) - AI成本) / AI成本 × 100%",
+        "health": "POSITIVE" if roi_pct >= 100 else "MARGINAL" if roi_pct >= 0 else "NEGATIVE",
+        "note": (
+            "优秀团队通常 3 年内实现 200%-400% 复合 ROI"
+            if roi_pct < 200 else "复合 ROI 处于行业领先水平"
+        ),
+    }
+
+
+# ─── Layer 2: 能力层 — 回答"Agent 有多自主" ──────────────
+
+def _collect_capability_layer(args) -> dict:
+    # P0: 约束自愈率
+    auto_heal_rate = _safe_ratio(args.auto_healed, args.constraint_failures_total)
+
+    # HITL 升级率（已有，归入能力层）
+    hitl_rate = _safe_ratio(args.hitl_count, max(args.execution_rounds, 1))
+
+    # MUST 约束通过率
+    must_pass_rate = 1.0 - _safe_ratio(args.must_failed, max(args.must_constraints, 1))
+
+    # 综合自主性评分 (0-100)
+    autonomy_score = _calc_autonomy_score(auto_heal_rate, hitl_rate, must_pass_rate)
+
+    return {
+        "auto_heal_rate": {
+            "value": round(auto_heal_rate, 4),
+            "display": f"{auto_heal_rate * 100:.1f}%",
+            "auto_healed": args.auto_healed,
+            "failures_total": args.constraint_failures_total,
+            "health": "EXCELLENT" if auto_heal_rate >= 0.70 else "GOOD" if auto_heal_rate >= 0.40 else "NEEDS_WORK",
+            "note": "Agent 自主修复约束失败的比例，直接反映自治修复能力",
+        },
+        "hitl_escalation_rate": {
+            "value": round(hitl_rate, 4),
+            "display": f"{hitl_rate * 100:.1f}%",
+            "hitl_count": args.hitl_count,
+            "execution_rounds": args.execution_rounds,
+            "health": "LOW_TOUCH" if hitl_rate <= 0.10 else "MODERATE" if hitl_rate <= 0.30 else "HIGH_TOUCH",
+        },
+        "must_pass_rate": {
+            "value": round(must_pass_rate, 4),
+            "display": f"{must_pass_rate * 100:.1f}%",
+            "must_passed": args.must_constraints - args.must_failed,
+            "must_total": args.must_constraints,
+        },
+        "autonomy_score": {
+            "value": round(autonomy_score, 1),
+            "display": f"{autonomy_score:.1f}/100",
+            "components": {
+                "auto_heal_weight": 0.4,
+                "must_pass_weight": 0.35,
+                "hitl_weight": 0.25,
+            },
+            "health": (
+                "L3_READY" if autonomy_score >= 80
+                else "L2_MATURE" if autonomy_score >= 60
+                else "L1_BASELINE"
+            ),
+        },
+    }
+
+
+def _calc_autonomy_score(auto_heal: float, hitl: float, must_pass: float) -> float:
+    """综合自主性评分"""
+    # 自愈率贡献 (0.4) + MUST 通过率 (0.35) + (1-HITL率) (0.25)
+    score = (
+        auto_heal * 40 +
+        must_pass * 35 +
+        (1.0 - min(hitl, 1.0)) * 25
+    )
+    return min(100.0, max(0.0, score))
+
+
+# ─── Layer 3: 效率层 — 回答"人机协作效率如何" ──────────────
+
+def _collect_efficiency_layer(args) -> dict:
+    # P1: 上下文压缩比
+    cc_ratio = _safe_ratio(args.context_input_tokens, max(args.context_output_tokens, 1))
+
+    # Token 效率：每任务平均 Token
+    tokens_per_task = (
+        args.token_usage / max(args.tasks_assigned, 1)
+        if args.token_usage > 0 else 0
+    )
+
+    # 执行效率：每轮次完成任务数
+    tasks_per_round = _safe_ratio(args.tasks_completed, max(args.execution_rounds, 1))
+
+    return {
+        "context_compression": {
+            "ratio": round(cc_ratio, 1),
+            "display": f"{cc_ratio:.1f}:1",
+            "input_tokens": args.context_input_tokens,
+            "output_tokens": args.context_output_tokens,
+            "health": "EXCELLENT" if cc_ratio >= 5.0 else "GOOD" if cc_ratio >= 3.0 else "ROOM_FOR_IMPROVEMENT",
+            "note": (
+                "上下文压缩比 ≥ 5:1 表示裁剪效果优秀"
+                if cc_ratio >= 5.0 else "建议使用 crop_context.py 进一步裁剪上下文"
+            ),
+        },
+        "token_efficiency": {
+            "tokens_per_task": round(tokens_per_task, 0),
+            "total_tokens": args.token_usage,
+            "total_tasks": args.tasks_assigned,
+            "health": "EFFICIENT" if tokens_per_task < 10000 else "NORMAL" if tokens_per_task < 25000 else "HIGH",
+        },
+        "execution_efficiency": {
+            "tasks_per_round": round(tasks_per_round, 2),
+            "tasks_completed": args.tasks_completed,
+            "execution_rounds": args.execution_rounds,
+            "health": "EFFICIENT" if tasks_per_round >= 1.5 else "NORMAL",
+        },
+    }
+
+
+# ─── Layer 4: 进化层 — 回答"系统在变好还是变差" ────────────
+
+def _collect_evolution_layer(args) -> dict:
+    # P1: 知识沉淀率
+    knowledge_rate = _safe_ratio(args.new_patterns, max(args.total_patterns, 1))
+
+    return {
+        "knowledge_crystallization": {
+            "rate": round(knowledge_rate, 4),
+            "display": f"{knowledge_rate * 100:.1f}%",
+            "new_patterns_this_cycle": args.new_patterns,
+            "total_patterns_accumulated": args.total_patterns,
+            "health": "ACTIVE_LEARNING" if knowledge_rate >= 0.15 else "STEADY" if knowledge_rate >= 0.05 else "STAGNANT",
+            "note": (
+                "知识持续沉淀中，意图图谱在持续进化"
+                if knowledge_rate >= 0.05
+                else "建议关注反思 LOOP 产出，增加模式发现"
+            ),
+        },
+        "trend_note": (
+            "趋势数据需多周期累积后分析。"
+            "建议每次 SCOPE-V 后运行本采集器，对比历史数据观察趋势。"
+        ),
+    }
+
+
+# ─── 兼容旧版字段 ──────────────────────────────────────────
+
+def _collect_pipeline(args) -> dict:
+    mt = getattr(args, "_matrix_tests", None)
+    if mt and not mt.get("skipped"):
+        return {"tests": mt["tests"]}
+    return {
+        "tests": {
+            "total": args.test_total,
+            "passed": args.test_passed,
+            "failed": args.test_failed,
+            "errors": args.test_errors,
+            "pass_rate": _safe_ratio(args.test_passed, max(args.test_total, 1)),
+        }
+    }
+
+
+def _collect_quality(args) -> dict:
+    mt = getattr(args, "_matrix_tests", None)
+    if mt and not mt.get("skipped"):
+        return {"coverage": mt["coverage"]}
+    return {
+        "coverage": {
+            "line_rate": args.coverage_pct,
+            "threshold": args.coverage_threshold,
+            "status": "PASS" if args.coverage_pct >= args.coverage_threshold else "FAIL",
+        }
+    }
+
+
+def _collect_performance(args) -> dict:
+    return {
+        "benchmark": {
+            "warmup": args.bench_warmup,
+            "samples": args.bench_samples,
+            "p50_ms": args.bench_p50,
+            "p95_ms": args.bench_p95,
+            "p99_ms": args.bench_p99,
+            "max_ms": args.bench_max,
+            "threshold_ms": args.bench_threshold,
+            "status": "PASS" if args.bench_p95 <= args.bench_threshold else "FAIL",
+        }
+    }
+
+
+def _collect_cost(args) -> dict:
+    return {
+        "token_usage": args.token_usage,
+        "token_source": getattr(args, "token_source", "estimated"),
+        "execution_rounds": args.execution_rounds,
+        "hitl_count": args.hitl_count,
+        "hitl_rate": _safe_ratio(args.hitl_count, max(args.execution_rounds, 1)),
+        "estimated_cost_usd": round(args.token_usage * 0.000002, 4),
+    }
+
+
+def _is_web_or_code_project(project_dir: Path) -> bool:
+    """判定是否应进行 NFR(G6-G8) 评估：含 Web/TS/JS/Go/Python 等源码的项目。"""
+    markers = ["package.json", "tsconfig.json", "go.mod", "requirements.txt",
+               "pyproject.toml", "pom.xml", "Cargo.toml"]
+    for m in markers:
+        if (project_dir / m).exists():
+            return True
+    for ext in ("*.ts", "*.tsx", "*.js", "*.jsx", "*.py", "*.go"):
+        try:
+            if any(project_dir.rglob(ext)):
+                return True
+        except Exception:
+            continue
+    return False
+
+
+# ── 约束矩阵 → 门禁 / 测试 的唯一来源：harness 执行引擎 ──
+# 门禁不再由 collect_telemetry 手工判定，而是直接消费 harness 对约束矩阵(check)
+# 与测试套件(tests) 的执行结果。门禁 G0-G8 共 9 个，统一由 harness 派生。
+_GATE_NAMES = {
+    "G0": "意图前置", "G1": "文件结构", "G2": "数据完整性", "G3": "行为正确",
+    "G4": "质量达标", "G5": "过程合规", "G6": "安全合规",
+    "G7": "可靠性合规", "G8": "可观测性合规",
+}
+_ALL_GATES = ["G0", "G1", "G2", "G3", "G4", "G5", "G6", "G7", "G8"]
+
+
+_HARNESS_VENV = Path.home() / ".agentic-agile-343" / "venv"
+
+
+def _can_import_yaml(python: str) -> bool:
+    """检测指定 python 解释器是否能 import yaml"""
+    try:
+        r = subprocess.run([python, "-c", "import yaml"], capture_output=True, timeout=10)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def _bootstrap_harness_venv() -> str:
+    """创建持久 venv（~/.agentic-agile-343/venv）并安装 pyyaml，返回 python 路径。
+
+    解决可移植性问题：skill 分享到其他机器后，系统 python3 未装 pyyaml，
+    harness.py _load_yaml 会 ModuleNotFoundError 导致全部门禁 UNEVALUATED。
+    旧版把 venv 放 /tmp（重启即丢）或硬编码作者路径（他机不存在），
+    本版改为用户主目录下持久 venv，首次自动创建、后续复用。
+    """
+    import venv as _venv
+    venv_py = _HARNESS_VENV / "bin" / "python"
+    if venv_py.exists() and _can_import_yaml(str(venv_py)):
+        return str(venv_py)
+    try:
+        _HARNESS_VENV.parent.mkdir(parents=True, exist_ok=True)
+        _venv.create(_HARNESS_VENV, with_pip=True, clear=True)
+        subprocess.run(
+            [str(venv_py), "-m", "pip", "install", "--quiet", "pyyaml>=6.0"],
+            capture_output=True, timeout=120,
+        )
+        return str(venv_py)
+    except Exception as e:
+        print(f"⚠️ 无法自动创建 harness venv: {e}", file=sys.stderr)
+        print(f"   请手动执行: python3 -m venv {_HARNESS_VENV} && "
+              f"{_HARNESS_VENV}/bin/pip install pyyaml", file=sys.stderr)
+        return sys.executable  # 降级，让 harness 自己报 pyyaml 缺失
+
+
+def _harness_py() -> str:
+    """返回可运行 harness 的 python（含 pyyaml）。
+
+    优先级:
+    1. HARNESS_PY 环境变量（用户显式指定，最高优先）
+    2. sys.executable（当前 python 已能 import yaml 则直接用）
+    3. ~/.agentic-agile-343/venv（自动创建的持久 venv，首次自动 bootstrap）
+    """
+    env_py = os.environ.get("HARNESS_PY")
+    if env_py and Path(env_py).exists():
+        return env_py
+    if _can_import_yaml(sys.executable):
+        return sys.executable
+    return _bootstrap_harness_venv()
+
+
+def _run_harness_json(project_dir: Path, sub: str, extra=None) -> dict | None:
+    """调用 harness CLI 并返回 JSON；失败返回含 __error__ 的 dict。
+
+    harness 是唯一执行引擎：约束矩阵由 harness check 评估、测试套件由 harness tests 运行。
+    collector 只做消费，不再重复实现门禁/测试逻辑（从源头解决）。
+    """
+    harness = Path(__file__).resolve().parent / "harness.py"
+    if not harness.exists():
+        return {"__error__": f"未找到 harness.py: {harness}"}
+    cmd = [_harness_py(), str(harness), sub, "--project-dir", str(project_dir)] + (extra or [])
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=360, cwd=str(project_dir))
+        return json.loads(proc.stdout)
+    except Exception as e:
+        return {"__error__": str(e)}
+
+
+def _wire_matrix(args, task_id):
+    """从约束矩阵派生门禁与测试，挂到 args 上供 _collect_* 消费（源头解决）。"""
+    out = getattr(args, "output", None)
+    if out and str(out).endswith("telemetry.json"):
+        project_dir = Path(out).resolve().parent.parent
+    else:
+        project_dir = Path.cwd()
+    if getattr(args, "auto_nfr", True) and _is_web_or_code_project(project_dir):
+        args._matrix_gov = _auto_run_nfr(project_dir)
+        args._matrix_tests = _derive_tests_from_matrix(project_dir)
+    else:
+        args._matrix_gov = None
+        args._matrix_tests = None
+
+
+def _auto_run_nfr(project_dir: Path) -> dict:
+    """从约束矩阵派生门禁（harness check --all）：按 MUST 约束判定每门禁通过。
+
+    返回所有 G0-G8 的逐条状态与 MUST 计数。
+    保证 Web/TS/Go 等项目在采集时必然评估全部门禁（含 G6-G8 Web 扩展），
+    且判定逻辑完全来自约束矩阵，而非手动传 --gates-total。
+    """
+    rep = _run_harness_json(project_dir, "check", ["--all", "--format", "json"])
+    if not rep or "__error__" in rep:
+        return {"gates": [], "passed": 0, "total": 0, "skipped": True,
+                "error": (rep or {}).get("__error__", "harness 调用失败"),
+                "must_constraints": 0, "must_failed": 0,
+                "nfr": {"auto_triggered": True, "applied": False, "skipped": True,
+                        "error": (rep or {}).get("__error__", "")}}
+    gates_src = rep.get("gates", {})
+    failed_by_gate = {}
+    for r in rep.get("results", []):
+        if r.get("gate") and not r.get("passed"):
+            failed_by_gate.setdefault(r["gate"], []).append(
+                f"{r['id']}: {r.get('detail', '')[:140]}")
+    gates, passed, must_total, must_failed = [], 0, 0, 0
+    for gid in _ALL_GATES:
+        g = gates_src.get(gid)
+        if not g:
+            continue
+        gp = g.get("gate_passed", False)
+        detail = "; ".join(failed_by_gate.get(gid, [])) or (
+            "所有 MUST 约束通过" if gp else "存在 MUST 约束失败")
+        gates.append({"id": gid, "name": _GATE_NAMES.get(gid, gid),
+                      "passed": gp, "detail": detail})
+        if gp:
+            passed += 1
+        must_total += g.get("must_total", 0)
+        must_failed += (g.get("must_total", 0) - g.get("must_passed", 0))
+    return {"gates": gates, "passed": passed, "total": len(gates),
+            "gates_passed": passed, "gates_total": len(gates),
+            "skipped": False, "error": "",
+            "must_constraints": must_total, "must_failed": must_failed,
+            "nfr": {"auto_triggered": True, "applied": True, "skipped": False, "error": ""}}
+
+
+def _derive_tests_from_matrix(project_dir: Path) -> dict:
+    """从约束矩阵运行测试套件：调用 harness tests，返回真实管道吞吐与覆盖率。
+
+    无测试套件 → status=NO_TEST_SUITE（诚实，非零静默）；有则解析 total/passed/failed/errors/coverage。
+    """
+    res = _run_harness_json(project_dir, "tests", ["--format", "json"])
+    if not res or "__error__" in res:
+        return {"skipped": True, "error": (res or {}).get("__error__", "harness 不可用"),
+                "tests": {"total": 0, "passed": 0, "failed": 0, "errors": 0,
+                          "pass_rate": 0.0, "status": "UNKNOWN",
+                          "detail": (res or {}).get("__error__", "")},
+                "coverage": {"line_rate": 0.0, "threshold": 90.0, "status": "UNKNOWN"}}
+    total = res.get("total", 0)
+    passed = res.get("passed", 0)
+    return {
+        "skipped": False, "error": "",
+        "tests": {
+            "total": total, "passed": passed,
+            "failed": res.get("failed", 0), "errors": res.get("errors", 0),
+            "pass_rate": _safe_ratio(passed, max(total, 1)),
+            "status": res.get("status", "UNKNOWN"),
+            "runner": res.get("runner"),
+            "detail": res.get("detail", ""),
+        },
+        "coverage": {
+            "line_rate": res.get("coverage", 0.0),
+            "threshold": res.get("coverage_threshold", 90.0),
+            "status": res.get("coverage_status", "UNKNOWN"),
+        },
+    }
+
+
+def _collect_governance(args) -> dict:
+    # 优先消费约束矩阵派生的门禁（harness check --all）；不可用时回退手工参数
+    mg = getattr(args, "_matrix_gov", None)
+    if mg and not mg.get("skipped"):
+        return {
+            "gates_passed": mg["gates_passed"],
+            "gates_total": mg["gates_total"],
+            "gates": mg["gates"],
+            "must_constraints": mg["must_constraints"],
+            "must_failed": mg["must_failed"],
+            "contract_pass_rate": _safe_ratio(args.contract_passed, max(args.contract_total, 1)),
+            "evidence_status": (
+                "READY_FOR_HITL"
+                if mg["must_failed"] == 0
+                and (mg["gates_total"] == 0
+                     or _safe_ratio(mg["gates_passed"], max(mg["gates_total"], 1)) == 1.0)
+                else "BLOCKED"
+            ),
+            "nfr": mg["nfr"],
+        }
+
+    # 回退：harness 不可用时，门禁统一标记为「未评估」(passed=null)。
+    # 不再从 --gates-passed 伪造逐条 pass/fail；手动参数仅用于计数，不用于判定。
+    fallback_gates = [
+        {"id": gid, "name": _GATE_NAMES.get(gid, gid), "passed": None,
+         "detail": "harness 不可用，未评估（手动计数仅供展示）"}
+        for gid in _ALL_GATES
+    ]
+    return {
+        "gates_passed": args.gates_passed,
+        "gates_total": args.gates_total,
+        "gates": fallback_gates,
+        "must_constraints": args.must_constraints,
+        "must_failed": args.must_failed,
+        "contract_pass_rate": _safe_ratio(args.contract_passed, max(args.contract_total, 1)),
+        "evidence_status": "UNEVALUATED",
+        "nfr": {
+            "auto_triggered": getattr(args, "auto_nfr", True),
+            "applied": False,
+            "skipped": True,
+            "error": "harness 不可用，门禁未评估；手动参数仅作计数降级",
+        },
+    }
+
+
+# ─── 工具函数 ──────────────────────────────────────────────
+
+def _safe_ratio(numerator, denominator) -> float:
+    if denominator == 0:
+        return 0.0
+    return round(numerator / denominator, 4)
+
+
+# ─── 主入口 ────────────────────────────────────────────────
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Agentic Agile 343 遥测收集器 v2.1 — 单次契约 + 项目累积双轨"
+    )
+    parser.add_argument("--project", default=None, help="项目名称")
+    parser.add_argument(
+        "--output",
+        default="governance/telemetry.json",
+        help="项目累积遥测路径（默认 governance/telemetry.json）",
+    )
+    parser.add_argument(
+        "--task",
+        default=None,
+        help="意图契约任务 ID，如 T-018；传入则写入单次遥测并更新项目 runs 索引",
+    )
+    parser.add_argument(
+        "--scope",
+        choices=["contract", "project", "auto"],
+        default="auto",
+        help="contract=单次契约, project=仅项目累积, auto=有 --task 则 contract",
+    )
+    parser.add_argument(
+        "--auto-nfr",
+        dest="auto_nfr",
+        action="store_true",
+        default=True,
+        help="自动运行 harness 跨语言 NFR 验证器评估 G6-G8（Web/TS/Go 等项目默认开启，保证门禁必然触发）",
+    )
+    parser.add_argument(
+        "--no-auto-nfr",
+        dest="auto_nfr",
+        action="store_false",
+        help="关闭自动 NFR 扫描（G6-G8 不参与评估，门禁逐条状态标记为未评估）",
+    )
+
+    # ── 旧版兼容参数 ──
+    parser.add_argument("--test-total", type=int, default=0)
+    parser.add_argument("--test-passed", type=int, default=0)
+    parser.add_argument("--test-failed", type=int, default=0)
+    parser.add_argument("--test-errors", type=int, default=0)
+    parser.add_argument("--coverage-pct", type=float, default=0.0)
+    parser.add_argument("--coverage-threshold", type=float, default=90.0)
+    parser.add_argument("--bench-warmup", type=int, default=1000)
+    parser.add_argument("--bench-samples", type=int, default=10000)
+    parser.add_argument("--bench-p50", type=float, default=0.0)
+    parser.add_argument("--bench-p95", type=float, default=0.0)
+    parser.add_argument("--bench-p99", type=float, default=0.0)
+    parser.add_argument("--bench-max", type=float, default=0.0)
+    parser.add_argument("--bench-threshold", type=float, default=2.0)
+    parser.add_argument("--token-usage", type=int, default=0)
+    parser.add_argument("--token-source", type=str, default="estimated",
+                        help="token 数据来源: measured:ocusage:project / measured:ocusage:client-total / estimated。"
+                             "由 fetch_token_usage.sh (@geeeger/ocusage) 实测时自动填写")
+    parser.add_argument("--execution-rounds", type=int, default=0)
+    parser.add_argument("--hitl-count", type=int, default=0)
+    parser.add_argument("--gates-passed", type=int, default=0,
+                        help="【降级】手动门禁通过数（仅 harness 不可用时使用，逐条状态标记为未评估）")
+    parser.add_argument("--gates-total", type=int, default=9,
+                        help="【降级】手动门禁总数（默认 9 = G0-G8；仅 harness 不可用时使用）")
+    parser.add_argument("--must-constraints", type=int, default=0)
+    parser.add_argument("--must-failed", type=int, default=0)
+    parser.add_argument("--contract-passed", type=int, default=0)
+    parser.add_argument("--contract-total", type=int, default=0)
+
+    # ── 价值层参数 ──
+    parser.add_argument("--tasks-assigned", type=int, default=0,
+                        help="【P0】总分配任务数")
+    parser.add_argument("--tasks-completed", type=int, default=0,
+                        help="【P0】正确完成的任务数")
+    parser.add_argument("--tasks-first-pass", type=int, default=0,
+                        help="【P0】一次性正确完成的任务数")
+
+    # ── 能力层参数 ──
+    parser.add_argument("--auto-healed", type=int, default=0,
+                        help="【P0】Agent 自主修复的约束失败数")
+    parser.add_argument("--constraint-failures-total", type=int, default=0,
+                        help="【P0】约束失败总数（含人工修复）")
+
+    # ── 价值层 ROI 参数 ──
+    parser.add_argument("--human-hourly-rate", type=float, default=0.0,
+                        help="【P1】人力时薪（元）")
+    parser.add_argument("--hours-saved-per-task", type=float, default=0.0,
+                        help="【P1】每任务平均节省工时")
+    parser.add_argument("--ai-monthly-cost", type=float, default=0.0,
+                        help="【P1】AI 工具月成本（元）")
+
+    # ── 效率层参数 ──
+    parser.add_argument("--context-input-tokens", type=int, default=0,
+                        help="【P1】裁剪前上下文 Token 数")
+    parser.add_argument("--context-output-tokens", type=int, default=0,
+                        help="【P1】裁剪后上下文 Token 数")
+
+    # ── 进化层参数 ──
+    parser.add_argument("--new-patterns", type=int, default=0,
+                        help="【P1】本周期新发现的模式数")
+    parser.add_argument("--total-patterns", type=int, default=0,
+                        help="【P1】累积模式总数")
+    parser.add_argument("--merge", default=None,
+                        help="合并多个遥测 JSON 文件（逗号分隔路径，或 'auto' 自动发现）")
+    parser.add_argument("--rebuild", action="store_true",
+                        help="仅根据已有 runs 重建项目累计遥测（修正聚合口径），不写入任何契约文件")
+    parser.add_argument("--module-id", default=None,
+                        help="模块 ID（多模块场景下标识遥测来源）")
+    parser.add_argument("--tool", default="workbuddy",
+                        help="使用的 AI 工具: workbuddy | codex | claude-code | other")
+
+    args = parser.parse_args()
+    # v1.19: --module-id 作为 --task 的 fallback（兼容旧调用习惯）
+    if not args.task and args.module_id:
+        args.task = args.module_id
+    if args.scope == "auto":
+        args.scope = "contract" if (args.task or args.module_id) else "project"
+
+    # 重建模式：仅根据已有 runs 重新累计项目级遥测（不触碰契约文件）
+    if args.rebuild:
+        project_path = Path(args.output)
+        if project_path.name != "telemetry.json":
+            project_path = project_path.parent / "telemetry.json" if project_path.suffix == ".json" else project_path / "telemetry.json"
+        existing = _load_json(project_path)
+        if not existing or not existing.get("runs"):
+            print("无可重建的 runs 历史，无法进行 --rebuild", file=sys.stderr)
+            return 1
+        runs = existing["runs"]
+        base = existing
+        agg = _aggregate_project_from_runs(
+            (base.get("meta") or {}).get("project"),
+            runs,
+            base,
+            project_path.parent,
+        )
+        agg["meta"]["links"] = {
+            "project_telemetry": "telemetry.json",
+            "contract_telemetry": None,
+            "dashboard_project": "dashboard.html",
+            "dashboard_contract": None,
+            "latest_contract_telemetry": (base.get("meta") or {}).get("links", {}).get("latest_contract_telemetry"),
+            "latest_dashboard_contract": (base.get("meta") or {}).get("links", {}).get("latest_dashboard_contract"),
+        }
+        agg["meta"]["run_count"] = len(runs)
+        agg["meta"]["latest_task_id"] = (base.get("meta") or {}).get("latest_task_id")
+
+        # ── 重建时从约束矩阵重新派生门禁与测试（代码可能已变更，不再沿用历史快照）──
+        # project_path = governance/telemetry.json → .parent=governance → .parent.parent=项目根
+        project_root = project_path.parent.parent
+        if getattr(args, "auto_nfr", True) and _is_web_or_code_project(project_root):
+            mg = _auto_run_nfr(project_root)
+            tests = _derive_tests_from_matrix(project_root)
+            gov = agg.get("governance", {}) or {}
+            if mg.get("skipped"):
+                gov["nfr"] = mg["nfr"]
+            else:
+                gov["gates"] = mg["gates"]
+                gov["gates_passed"] = mg["gates_passed"]
+                gov["gates_total"] = mg["gates_total"]
+                gov["must_constraints"] = mg["must_constraints"]
+                gov["must_failed"] = mg["must_failed"]
+                gov["nfr"] = mg["nfr"]
+            if not tests.get("skipped"):
+                agg["pipeline"] = {"tests": tests["tests"]}
+                agg["quality"] = {"coverage": tests["coverage"]}
+            agg["governance"] = gov
+
+        _write_json(project_path, agg)
+        dash = write_static_dashboard(project_path.parent / "dashboard.html", agg, _find_dashboard_template())
+        t = agg
+        print(f"项目累计遥测已重建（--rebuild）")
+        print(f"  项目累积: {project_path}")
+        print(f"  范围: project · 契约数: {len(runs)}")
+        print(f"  版本: {t['meta']['version']} ({t['meta']['model']})")
+        print(f"  价值层 — 目标准确率: {t['value']['goal_accuracy']['display']}")
+        print(f"  价值层 — 首次成功率: {t['value']['first_pass_rate']['display']}")
+        print(f"  能力层 — 约束自愈率: {t['capability']['auto_heal_rate']['display']}")
+        print(f"  能力层 — 自主性评分: {t['capability']['autonomy_score']['display']}")
+        print(f"  价值层 — 复合 ROI: {t['value']['compound_roi'].get('display', 'N/A')}")
+        print(f"  效率层 — 上下文压缩比: {t['efficiency']['context_compression']['display']}")
+        print(f"  进化层 — 知识沉淀率: {t['evolution']['knowledge_crystallization']['display']}")
+        print(f"  证书资格: {t['certificate_eligibility']['label']} (CTA={'启用' if t['certificate_eligibility']['cta_enabled'] else '禁用'})")
+        print(f"  总览大屏(纯静态双击): {dash}")
+        return 0
+
+    # 合并模式
+    if args.merge:
+        merged = merge_telemetry_files(args)
+        with open(args.output, "w", encoding="utf-8") as f:
+            json.dump(merged, f, indent=2, ensure_ascii=False)
+        print(f"合并完成: {merged['sources']} 个源 → {args.output}", file=sys.stderr)
+        return 0
+
+    telemetry = collect(args)
+    result = persist_telemetry(args, telemetry)
+    t = result["telemetry"]
+    print(f"遥测数据已写入")
+    if result.get("contract_path"):
+        print(f"  单次契约: {result['contract_path']}")
+    print(f"  项目累积: {result['project_path']}")
+    print(f"  范围: {t['meta'].get('scope')} · 任务: {t['meta'].get('task_id') or '—'}")
+    print(f"  版本: {t['meta']['version']} ({t['meta']['model']})")
+    print(f"  价值层 — 目标准确率: {t['value']['goal_accuracy']['display']}")
+    print(f"  价值层 — 首次成功率: {t['value']['first_pass_rate']['display']}")
+    print(f"  能力层 — 约束自愈率: {t['capability']['auto_heal_rate']['display']}")
+    print(f"  能力层 — 自主性评分: {t['capability']['autonomy_score']['display']}")
+    print(f"  价值层 — 复合 ROI: {t['value']['compound_roi'].get('display', 'N/A')}")
+    print(f"  效率层 — 上下文压缩比: {t['efficiency']['context_compression']['display']}")
+    print(f"  进化层 — 知识沉淀率: {t['evolution']['knowledge_crystallization']['display']}")
+    if result.get("project") and result["project"].get("runs"):
+        print(f"  历史契约数: {len(result['project']['runs'])}")
+    if result.get("dashboard_project"):
+        print(f"  总览大屏(纯静态双击): {result['dashboard_project']}")
+    if result.get("dashboard_contract"):
+        print(f"  单次大屏(纯静态双击): {result['dashboard_contract']}")
+    return 0
+
+
+def merge_telemetry_files(args) -> dict:
+    """合并多个遥测 JSON 文件
+
+    支持:
+      --merge auto: 自动发现（governance/telemetry.json + modules/*/governance/telemetry.json）
+      --merge file1.json,file2.json: 手动指定文件列表
+    """
+    import glob as glob_mod
+    files = []
+
+    if args.merge == "auto":
+        # 自动发现
+        patterns = [
+            "governance/telemetry.json",
+            "modules/*/governance/telemetry.json",
+            ".codex/telemetry.json",
+            ".claude/telemetry.json",
+        ]
+        for pat in patterns:
+            for f in glob_mod.glob(pat):
+                if f not in files:
+                    files.append(f)
+    else:
+        files = [f.strip() for f in args.merge.split(",")]
+
+    if not files:
+        return {"error": "未找到任何遥测文件", "sources": 0}
+
+    merged = {
+        "merged_at": __import__('datetime').datetime.now().isoformat(),
+        "sources": len(files),
+        "source_files": files,
+        "modules": [],
+        "totals": {
+            "tasks_assigned": 0,
+            "tasks_completed": 0,
+            "tasks_first_pass": 0,
+            "hitl_count": 0,
+            "token_usage": 0,
+            "gates_passed": 0,
+            "gates_total": 0,
+        },
+    }
+
+    for f in files:
+        try:
+            with open(f) as fh:
+                data = json.load(fh)
+        except Exception:
+            continue
+
+        # 提取模块级数据
+        value = data.get("value", {})
+        capability = data.get("capability", {})
+        module_entry = {
+            "source": f,
+            "project": data.get("meta", {}).get("project", data.get("project", "unknown")),
+            "module_id": data.get("module_id", args.module_id or f.split("/")[0]),
+            "tool": data.get("tool", args.tool),
+            "tasks_assigned": data.get("tasks_assigned", 0),
+            "tasks_completed": data.get("tasks_completed", 0),
+            "tasks_first_pass": data.get("tasks_first_pass", 0),
+            "hitl_count": data.get("hitl_count", 0),
+            "token_usage": data.get("token_usage", 0),
+            "gates_passed": data.get("gates_passed", 0),
+            "gates_total": data.get("gates_total", 0),
+            "coverage_pct": data.get("coverage_pct", 0),
+            "benchmark_p95_ms": data.get("bench_p95", data.get("benchmark_p95_ms", 0)),
+        }
+        merged["modules"].append(module_entry)
+
+        # 累加总计
+        for key in ["tasks_assigned", "tasks_completed", "tasks_first_pass",
+                     "hitl_count", "token_usage", "gates_passed", "gates_total"]:
+            merged["totals"][key] += module_entry.get(key, 0)
+
+    # 计算聚合指标
+    t = merged["totals"]
+    t["goal_accuracy"] = round(t["tasks_completed"] / max(t["tasks_assigned"], 1) * 100, 1)
+    t["first_pass_rate"] = round(t["tasks_first_pass"] / max(t["tasks_completed"], 1) * 100, 1)
+
+    return merged
+
+
+if __name__ == "__main__":
+    sys.exit(main())

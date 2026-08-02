@@ -1,0 +1,113 @@
+# 证据包（结构化 YAML）
+# 与 Template_Evidence_Bundle.md 配合使用：YAML 供脚本消费，MD 供人类审阅
+# 版本: 1.5 — 增加五类证据分类、证据映射表、遥测、escalate 裁决
+
+# ── 基线（意图证据：做的是不是已确认的事）──
+id: "EVID-XXX-001"
+generated_at: "2026-01-01T10:00:00+08:00"
+
+baselines:
+  intent_contract: "INTENT-XXX-001@1.0"    # 契约 ID@版本
+  constraint_matrix: "XXX-CONSTRAINTS@1.0"  # 约束矩阵@版本
+  code_revision: "git:abc1234"              # git commit hash
+
+# ── 变更证据：实际改了什么 ──
+change_summary:
+  changed_paths:
+    - "src/feature.ts"
+    - "tests/feature.test.ts"
+  excluded_paths_confirmed:                 # 显式确认未触碰的范围
+    - "src/auth/**"
+    - "src/payment/**"
+
+# ── 行为证据：功能是否满足 AC ──
+acceptance_results:
+  - ac_id: "AC-01"
+    status: "pass"                           # pass | fail | unknown
+    evidence:
+      - "reports/ac-01-success.xml"
+  - ac_id: "AC-02"
+    status: "pass"
+    evidence:
+      - "reports/ac-02-edge-case.xml"
+  - ac_id: "AC-03"
+    status: "unknown"
+    evidence: []
+    note: "依赖外部服务，本轮未验证"
+
+# ── 约束证据：红线是否被执行 ──
+constraint_results:
+  - constraint_id: "C-SEC-01"
+    status: "pass"
+    evidence:
+      - "reports/security-scan.json"
+  - constraint_id: "C-QUAL-01"
+    status: "pass"
+    observed: "覆盖率 87% ≥ 阈值 80%"
+  - constraint_id: "C-PROC-03"
+    status: "escalate"                       # 需人工裁决的约束
+    note: "影响范围不明确，提交 IO/OA 裁决"
+
+# ── 失败与恢复（所有项目通用，不限 Web）──
+failures_and_recovery:
+  - finding: "并发请求可能重复写入"
+    action: "增加唯一约束并重跑并发测试"
+    result: "pass"                           # pass | fail | partial
+
+# ── 未覆盖风险 ──
+uncovered_risks:
+  - "验证邮件策略尚未确认"
+  - "大文件上传场景未测试"
+
+# ── 运行与价值证据：消耗和实际结果 ──
+telemetry:
+  duration_minutes: 24
+  agent_calls: 18
+  repair_loops: 2
+  token_usage: 45000
+  hitl_count: 1
+  first_pass: false                          # 是否一次通过
+
+# ── 证据映射表：快速暴露"测试很多但关键问题没证据"──
+evidence_mapping:
+  # | 目标项          | 证据                     | 来源是否独立 | 结果    | 缺口        |
+  - target: "AC-01 正常流程"
+    evidence: ["接口测试", "数据库检查"]
+    independent: true
+    result: "pass"
+    gap: ""
+  - target: "AC-03 外部依赖"
+    evidence: []
+    independent: false
+    result: "unknown"
+    gap: "依赖外部服务未验证"
+  - target: "SEC-01 安全扫描"
+    evidence: ["静态扫描", "存储检查", "日志测试"]
+    independent: true
+    result: "pass"
+    gap: ""
+
+# ── 证据强度匹配风险 ──
+# 不是风险高就无限加测试，而是让证据更独立、更接近真实风险
+risk_evidence_match:
+  - change: "文案调整"
+    risk: "低（易发现、易恢复）"
+    evidence_needed: "预览 + 人工确认"
+    decision: "自动检查或快速人工浏览"
+  - change: "业务接口逻辑"
+    risk: "中（可能误伤用户）"
+    evidence_needed: "自动测试 + 正反例 + 代码评审"
+    decision: "自动检查后由负责人确认歧义"
+  - change: "权限/隐私/资金/生产写"
+    risk: "高（部分不可逆）"
+    evidence_needed: "独立安全验证 + 审计记录 + 受控环境 + 明确审批"
+    decision: "人类核对关键证据后决定是否放行"
+
+# ── 建议裁决 ──
+recommendation:
+  action: "escalate"                         # approve | approve_with_conditions | return | reduce_scope | stop | request_clarification | escalate
+  reason: "存在未覆盖风险，需要 IO 决定本轮范围"
+  # 仅 action=approve_with_conditions 时填写
+  conditions: []
+  # 仅 action=return / reduce_scope 时填写
+  required_changes: []

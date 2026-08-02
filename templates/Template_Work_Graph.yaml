@@ -1,0 +1,180 @@
+# 工作图（Work Graph / DAG）
+# 定义任务节点、依赖关系、并行组、合流点
+# Graph Engine 读取此文件自动推导执行计划
+# 版本: 1.2 — 骨架化：仅保留 T-001，其余按需增删
+
+project: YOUR_PROJECT_NAME
+
+# ── 全局超时与重调度配置 ──
+execution_policy:
+  default_timeout_minutes: 60    # 单节点默认超时
+  max_total_timeout_minutes: 480 # 整个 DAG 最大执行时间
+  reschedule_on_timeout: true    # 超时后自动重调度
+  max_reschedule_attempts: 2     # 最多重调度次数
+  notify_on_timeout: ["OA", "IO"]
+
+# ── 组织图（Org Graph）──
+# 所有项目通用，无需修改
+org:
+  roles:
+    IO:
+      name: 意图主理人
+      powers: [签署契约, 签署证据包, 批准例外, 最终裁决]
+    OA:
+      name: 编排架构师
+      powers: [维护图谱, 裁剪契约, 维护约束, 汇总证据, 呼叫HITL]
+    AS:
+      name: 自治蜂群
+      powers: [执行SCOPE-V, 编写代码, 运行测试, 生成证据]
+      limits: [不得签署契约, 不得降低门禁, 不得跳过测试]
+
+  hitl_edges:
+    - from: AS
+      to: IO
+      triggers: [越权操作, MUST约束失败, 预算异常, 证据不足]
+    - from: OA
+      to: IO
+      triggers: [契约待签署, 证据包待裁决, 例外待批准]
+
+# ── 工作图（Work Graph / DAG）──
+# ⚠️ 以下仅为最小骨架（T-001）。OA 根据项目特征按需增删节点。
+# 增删指南见文件末尾 §节点设计指引。
+nodes:
+  # 阶段 0: 治理初始化（所有项目必须）
+  T-001:
+    label: "治理初始化"
+    type: init
+    depends_on: []
+    assigned_to: OA
+    produces:
+      - "governance/Intent_Graph.md"
+      - "governance/Constraint_Matrix.md"
+      - "governance/Intent_Contract.md"
+      - "governance/evidence/Evidence_Bundle.md"
+    gate: null
+
+  # ═══════════════════════════════════════════════════════
+  # 以下为常见节点模式（注释状态）。OA 按需取消注释并调整。
+  # ═══════════════════════════════════════════════════════
+
+  # ── 模式 A: 需求+架构设计（推荐用于多域/全栈项目）──
+  # 取消注释条件: 项目 ≥3 个业务域 或 技术栈未定 或 需要 ADR 决策记录
+  #
+  # T-002:
+  #   label: "需求分析与架构设计"
+  #   type: specify+constrain
+  #   depends_on: [T-001]
+  #   assigned_to: OA+AS
+  #   produces:
+  #     - "docs/requirements.md"
+  #     - "docs/architecture.md"
+  #     - "docs/adr/ADR-*.md"
+  #   gate: HITL
+
+  # ── 模式 B: 单域实现（简单项目直接进入此阶段）──
+  # 取消注释条件: 所有项目必须至少有 1 个实现节点
+  #
+  # T-003:
+  #   label: "核心功能实现"
+  #   type: orchestrate
+  #   depends_on: [T-001]  # 或 [T-002]（如有架构阶段）
+  #   assigned_to: AS
+  #   domain: core
+  #   produces:
+  #     - "src/"
+  #     - "tests/"
+  #   gate: HITL
+
+  # ── 模式 C: 多域并行（≥3 个独立域时使用）──
+  # 取消注释条件: 有 2+ 个互不依赖的业务域可并行开发
+  #
+  # T-004:
+  #   label: "域A MVP"
+  #   type: orchestrate
+  #   depends_on: [T-003]
+  #   assigned_to: AS
+  #   domain: domain_a
+  #   parallel_group: domain_mvp
+  #   timeout_minutes: 90
+  #   on_timeout: "reschedule"
+  #   produces:
+  #     - "src/api/domain_a/"
+  #     - "src/models/domain_a.py"
+  #     - "tests/test_domain_a.py"
+  #   gate: HITL
+  #
+  # T-005:
+  #   label: "域B MVP"
+  #   type: orchestrate
+  #   depends_on: [T-003]
+  #   assigned_to: AS
+  #   domain: domain_b
+  #   parallel_group: domain_mvp
+  #   produces:
+  #     - "src/api/domain_b/"
+  #     - "src/models/domain_b.py"
+  #     - "tests/test_domain_b.py"
+  #   gate: HITL
+
+  # ── 模式 D: 合流 + 验证（多域项目推荐）──
+  # 取消注释条件: 有 2+ 个并行节点需要合流验证
+  #
+  # Evolve:
+  #   label: "集成测试 + Benchmark + UAT"
+  #   type: evolve
+  #   depends_on: [T-003, T-004, T-005]  # 列出所有需合流的节点
+  #   assigned_to: AS
+  #   produces:
+  #     - "tests/test_integration.py"
+  #     - "assets/benchmark.json"
+  #     - "Dockerfile"
+  #   gate: null
+  #
+  # Verify:
+  #   label: "全部门禁验证 + 发布裁决"
+  #   type: verify
+  #   depends_on: [Evolve]  # 或直接 [最后一个实现节点]
+  #   assigned_to: OA
+  #   produces:
+  #     - "governance/evidence/RELEASE_Evidence_Bundle.md"
+  #   gate: HITL
+
+# ── 并行策略 ──
+# 取消注释条件: 存在 parallel_group 的节点
+#
+# parallel_strategy:
+#   domain_mvp:
+#     max_parallel: 2
+#     description: "业务域 MVP 实现"
+
+# ── 分支与回退规则 ──
+branch_rules:
+  on_gate_failure:
+    action: rollback
+    target: "failed_node"
+    max_retries: 3
+
+  on_hitl_reject:
+    action: rollback
+    target: "Evolve"
+
+# ═══════════════════════════════════════════════════════════
+# 节点设计指引（OA 裁剪时参考）
+# ═══════════════════════════════════════════════════════════
+#
+# 1. 判断是否需要 T-002（架构设计阶段）:
+#    ✅ 需要: 多域全栈项目、技术栈未定、需 ADR 记录
+#    ❌ 跳过: 单域简单项目（如 CLI 工具、规则引擎）、技术栈已定
+#
+# 2. 判断实现阶段节点数:
+#    单域项目: 1 个节点 → T-003
+#    多域串行: 每个域 1 个节点，depends_on 串联
+#    多域并行: 共享 parallel_group，depends_on 指向同一上游
+#
+# 3. 判断是否需要 Evolve + Verify 分离:
+#    ✅ 分离: 多域项目（需合流测试 + 最终门禁）
+#    ❌ 合并: 单域项目可在 T-003 的 gate 直接 HITL
+#
+# 4. 极简项目示例（如差旅报销规则引擎）:
+#    nodes: [T-001, T-002(实现)] → gate: HITL → 完成
+#    仅 2 个节点，跳过架构/Evolve/Verify

@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2026 王立杰
+Copyright (c) 2026 王立杰（无敌哥 / iloveagile）
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,3 +19,11 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+说明：本仓库中的 **代码与模板**（`scripts/`、`templates/`、`SKILL.md`、`references/` 等）
+依上述 MIT 协议授权。
+
+**白皮书**（`docs/whitepaper/`）单独以 **Creative Commons Attribution 4.0
+International (CC BY 4.0)** 授权：转载、二次创作需注明来源（王立杰-无敌哥）。

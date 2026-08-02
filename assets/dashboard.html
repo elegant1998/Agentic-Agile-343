@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agentic Agile 343 — 算力与价值遥测 v2.0</title>
+<style>
+  :root {
+    --bg: #0a0e17; --card-bg: #111827; --border: #1e293b;
+    --text: #e2e8f0; --text-dim: #94a3b8;
+    --green: #22c55e; --red: #ef4444; --amber: #f59e0b;
+    --blue: #3b82f6; --purple: #8b5cf6; --cyan: #06b6d4; --pink: #ec4899;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    padding: 24px; min-height: 100vh;
+  }
+  .header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 20px; padding-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .header h1 { font-size: 1.4rem; font-weight: 700; }
+  .header .badge {
+    padding: 4px 12px; border-radius: 999px; font-size: 0.7rem; font-weight: 600;
+  }
+  .badge-pass { background: #166534; color: var(--green); }
+  .badge-warn { background: #78350f; color: var(--amber); }
+  .badge-fail { background: #7f1d1d; color: var(--red); }
+  .badge-info { background: #1e3a5f; color: var(--blue); }
+  .meta { color: var(--text-dim); font-size: 0.7rem; }
+  .nav-row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:8px; }
+  .nav-link {
+    display:inline-block; padding:4px 10px; border-radius:6px; font-size:0.7rem;
+    text-decoration:none; border:1px solid var(--border); color: var(--cyan);
+    background: #0f172a;
+  }
+  .nav-link:hover { border-color: var(--cyan); }
+  .nav-link.active { background: #164e63; color: #fff; border-color: var(--cyan); }
+  /* 纯静态 file:// 可打开：数据由 collect 内嵌，无需 serve */
+  .scope-pill {
+    padding: 2px 8px; border-radius: 999px; font-size: 0.65rem; font-weight: 600;
+    background: #312e81; color: #c7d2fe;
+  }
+  .scope-pill.contract { background: #14532d; color: #bbf7d0; }
+  .cert-banner {
+    margin: 0 0 20px; padding: 18px 20px; border-radius: 12px;
+    border: 1px solid var(--border); background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  }
+  .cert-banner.eligible {
+    border-color: #f59e0b66; background: linear-gradient(135deg, #1c1917 0%, #422006 55%, #0f172a 100%);
+    box-shadow: 0 0 0 1px #f59e0b22, 0 8px 24px #0006;
+  }
+  .cert-banner.ineligible {
+    border-color: #334155; opacity: 0.92;
+  }
+  .cert-banner .cert-title {
+    font-size: 0.95rem; font-weight: 700; margin-bottom: 6px; display:flex; align-items:center; gap:8px;
+  }
+  .cert-banner .cert-desc {
+    font-size: 0.72rem; color: var(--text-dim); line-height: 1.55; margin-bottom: 12px; max-width: 720px;
+  }
+  .cert-banner .cert-reasons {
+    font-size: 0.7rem; color: var(--text-dim); margin: 0 0 12px 0; padding-left: 1.1em;
+  }
+  .cert-banner .cert-reasons li { margin: 2px 0; }
+  .cert-cta {
+    display: inline-block; padding: 10px 18px; border-radius: 10px; font-size: 0.8rem; font-weight: 700;
+    text-decoration: none; border: none; cursor: pointer; transition: filter 0.15s, transform 0.1s;
+  }
+  .cert-cta.enabled {
+    background: linear-gradient(90deg, #f59e0b, #ea580c); color: #fff;
+    box-shadow: 0 4px 14px #f59e0b44;
+  }
+  .cert-cta.enabled:hover { filter: brightness(1.08); transform: translateY(-1px); }
+  .cert-cta.disabled {
+    background: #1e293b; color: #64748b; border: 1px solid #334155; cursor: not-allowed;
+    pointer-events: none; opacity: 0.75;
+  }
+  .cert-metrics {
+    display: flex; flex-wrap: wrap; gap: 10px 16px; margin-bottom: 12px; font-size: 0.68rem; color: var(--text-dim);
+  }
+  .cert-metrics b { color: var(--text); }
+  .runs-table a { color: var(--cyan); text-decoration: none; }
+  .runs-table a:hover { text-decoration: underline; }
+  .runs-table tr.current { background: #1e293b; }
+
+  .layer-title {
+    font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.15em;
+    color: var(--text-dim); margin: 20px 0 10px; padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+  }
+  .grid { display: grid; gap: 12px; }
+  .grid-4 { grid-template-columns: repeat(4, 1fr); }
+  .grid-3 { grid-template-columns: repeat(3, 1fr); }
+  .grid-2 { grid-template-columns: repeat(2, 1fr); }
+
+  .card {
+    background: var(--card-bg); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px;
+  }
+  .card h3 {
+    font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--text-dim); margin-bottom: 10px;
+  }
+  .card .value {
+    font-size: 1.75rem; font-weight: 700; line-height: 1.2;
+  }
+  .card .unit { font-size: 0.7rem; color: var(--text-dim); margin-left: 3px; }
+  .card .sub { font-size: 0.7rem; color: var(--text-dim); margin-top: 4px; }
+  .card .tag {
+    display: inline-block; padding: 2px 8px; border-radius: 4px;
+    font-size: 0.6rem; font-weight: 600; margin-top: 6px;
+  }
+  .tag-green { background: #166534; color: var(--green); }
+  .tag-amber { background: #78350f; color: var(--amber); }
+  .tag-red { background: #7f1d1d; color: var(--red); }
+  .tag-blue { background: #1e3a5f; color: var(--blue); }
+  .tag-purple { background: #3b0764; color: var(--purple); }
+
+  .bar-wrap { margin-top: 6px; }
+  .bar-bg { height: 5px; background: var(--border); border-radius: 3px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 3px; transition: width 0.6s ease; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.75rem; }
+  th { text-align: left; color: var(--text-dim); padding: 6px 10px; border-bottom: 1px solid var(--border); font-weight: 500; }
+  td { padding: 6px 10px; border-bottom: 1px solid var(--border); }
+
+  .footer {
+    margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--border);
+    color: var(--text-dim); font-size: 0.65rem; text-align: center;
+  }
+
+  @media (max-width: 900px) {
+    .grid-4 { grid-template-columns: repeat(2, 1fr); }
+    .grid-3 { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 600px) {
+    .grid-4, .grid-3, .grid-2 { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>⚡ Agentic Agile 343</h1>
+    <div class="meta" id="meta-line">算力与价值遥测 v2.1 · 单次契约 / 项目累积</div>
+    <div class="nav-row" id="nav-row"></div>
+  </div>
+  <div style="text-align:right;">
+    <span class="scope-pill" id="scope-pill">PROJECT</span>
+    <span class="badge badge-info" id="evidence-badge" style="margin-left:6px;">⏳ 收集中</span>
+  </div>
+</div>
+
+<!-- ═══ 项目自治成熟度证书资格（醒目区） ═══ -->
+<div class="cert-banner ineligible" id="cert-banner">
+  <div class="cert-title" id="cert-title">🏅 项目自治成熟度证书</div>
+  <div class="cert-desc" id="cert-desc">
+    加载中…
+  </div>
+  <div class="cert-metrics" id="cert-metrics"></div>
+  <ul class="cert-reasons" id="cert-reasons"></ul>
+  <a class="cert-cta disabled" id="cert-cta" href="#" aria-disabled="true">达到 L3 后可申请证书</a>
+</div>
+
+<!-- ═══ 历史契约索引（项目累积视图） ═══ -->
+<div class="layer-title" id="runs-title">📚 历史契约遥测 <span style="font-size:0.7rem;font-weight:400;color:var(--text-dim);">（点击任意契约可查看其独立大屏快照）</span></div>
+<div class="card" id="runs-panel" style="margin-bottom:16px;">
+  <div id="runs-table" class="runs-table"></div>
+</div>
+
+<!-- ═══ Layer 1: 价值层 ═══ -->
+<div class="layer-title">📐 Layer 1 — 价值层：AI 创造多少价值</div>
+<div class="grid grid-4" id="value-kpi"></div>
+<div class="grid grid-2" style="margin-top:12px;">
+  <div class="card">
+    <h3>💵 复合 ROI 明细</h3>
+    <div id="roi-breakdown"></div>
+  </div>
+  <div class="card">
+    <h3>🎯 准确率与成功率趋势</h3>
+    <div id="accuracy-bars"></div>
+  </div>
+</div>
+
+<!-- ═══ Layer 2: 能力层 ═══ -->
+<div class="layer-title">🦾 Layer 2 — 能力层：Agent 有多自主</div>
+<div class="grid grid-4" id="capability-kpi"></div>
+
+<!-- ═══ Layer 3: 效率层 ═══ -->
+<div class="layer-title">⚙️ Layer 3 — 效率层：人机协作效率如何</div>
+<div class="grid grid-3" id="efficiency-kpi"></div>
+
+<!-- ═══ Layer 4: 进化层 ═══ -->
+<div class="layer-title">🧬 Layer 4 — 进化层：系统在变好还是变差</div>
+<div class="grid grid-2" id="evolution-panel"></div>
+
+<!-- ═══ 传统指标（兼容） ═══ -->
+<div class="layer-title">📊 传统指标（兼容旧版）</div>
+<div class="grid grid-2">
+  <div class="card">
+    <h3>🧪 管道吞吐</h3>
+    <div id="pipeline-table"></div>
+  </div>
+  <div class="card">
+    <h3>🛡️ 门禁状态</h3>
+    <div id="gates-table"></div>
+  </div>
+</div>
+<div class="grid grid-2" style="margin-top:12px;">
+  <div class="card">
+    <h3>⚡ 性能基准</h3>
+    <div id="perf-table"></div>
+  </div>
+  <div class="card">
+    <h3>💰 成本概览</h3>
+    <div id="cost-table"></div>
+  </div>
+</div>
+
+<div class="footer">
+  Agentic Agile 343 Telemetry Dashboard v2.2 · 纯静态 · 双击 HTML 即可
+  · 总览 dashboard.html ⇄ 单次 dashboard-T-XXX.html · 数据内嵌，无需 Server
+</div>
+
+<!-- TELEMETRY_EMBED_START -->
+<script type="application/json" id="telemetry-data">null</script>
+<!-- TELEMETRY_EMBED_END -->
+
+<script>
+/** 优先读内嵌 JSON（file:// 可用）；无内嵌时再尝试 fetch（可选） */
+function readEmbeddedTelemetry() {
+  const el = document.getElementById('telemetry-data');
+  if (!el) return null;
+  const raw = (el.textContent || '').trim();
+  if (!raw || raw === 'null') return null;
+  try { return JSON.parse(raw); } catch (e) { return null; }
+}
+
+function pctBar(value, max, colorFn) {
+  const pct = Math.min(100, Math.max(0, (value / (max || 1)) * 100));
+  const color = typeof colorFn === 'function' ? colorFn(pct) : 'var(--green)';
+  return `<div class="bar-wrap">
+    <div class="bar-bg"><div class="bar-fill" style="width:${pct}%;background:${color};"></div></div>
+  </div>`;
+}
+
+function healthColor(h) {
+  const map = {
+    'L3_READY': 'var(--green)', 'EXCELLENT': 'var(--green)', 'POSITIVE': 'var(--green)',
+    'ACTIVE_LEARNING': 'var(--green)', 'LOW_TOUCH': 'var(--green)', 'EFFICIENT': 'var(--green)',
+    'L2_COLLAB': 'var(--amber)', 'GOOD': 'var(--amber)', 'MARGINAL': 'var(--amber)',
+    'L2_MATURE': 'var(--amber)', 'MODERATE': 'var(--amber)', 'NORMAL': 'var(--amber)',
+    'STEADY': 'var(--amber)',
+    'NEEDS_IMPROVEMENT': 'var(--red)', 'NEEDS_WORK': 'var(--red)', 'NEGATIVE': 'var(--red)',
+    'L1_BASELINE': 'var(--red)', 'HIGH_TOUCH': 'var(--red)', 'HIGH': 'var(--red)',
+    'STAGNANT': 'var(--red)',
+  };
+  return map[h] || 'var(--text-dim)';
+}
+
+function healthTag(h) {
+  const map = {
+    'L3_READY': 'tag-green', 'EXCELLENT': 'tag-green', 'POSITIVE': 'tag-green',
+    'ACTIVE_LEARNING': 'tag-green', 'LOW_TOUCH': 'tag-green', 'EFFICIENT': 'tag-green',
+    'L2_COLLAB': 'tag-amber', 'GOOD': 'tag-amber', 'MARGINAL': 'tag-amber',
+    'L2_MATURE': 'tag-amber', 'MODERATE': 'tag-amber', 'NORMAL': 'tag-amber',
+    'STEADY': 'tag-amber',
+    'NEEDS_IMPROVEMENT': 'tag-red', 'NEEDS_WORK': 'tag-red', 'NEGATIVE': 'tag-red',
+    'L1_BASELINE': 'tag-red', 'HIGH_TOUCH': 'tag-red', 'HIGH': 'tag-red',
+    'STAGNANT': 'tag-red',
+  };
+  return map[h] || 'tag-blue';
+}
+
+function contractHtmlName(taskId) {
+  return `dashboard-${taskId}.html`;
+}
+
+function renderNav(t, mode) {
+  const scope = (t.meta && t.meta.scope) || (mode === 'contract' ? 'contract' : 'project');
+  const taskId = (t.meta && t.meta.task_id) || '';
+  const pill = document.getElementById('scope-pill');
+  pill.textContent = scope === 'contract' ? `CONTRACT ${taskId || ''}`.trim() : 'PROJECT';
+  pill.className = 'scope-pill' + (scope === 'contract' ? ' contract' : '');
+
+  const nav = document.getElementById('nav-row');
+  const links = [];
+  // 纯静态相对链接：dashboard.html ↔ dashboard-T-XXX.html
+  links.push(`<a class="nav-link ${scope === 'project' ? 'active' : ''}" href="dashboard.html">📊 项目总遥测</a>`);
+  if (taskId) {
+    links.push(`<a class="nav-link ${scope === 'contract' ? 'active' : ''}" href="${contractHtmlName(taskId)}">📄 当前契约 ${taskId}</a>`);
+  }
+  const latestTask = (t.meta && t.meta.latest_task_id) || null;
+  if (scope === 'project' && latestTask) {
+    links.push(`<a class="nav-link" href="${contractHtmlName(latestTask)}">↗ 最近一次 ${latestTask}</a>`);
+    links.push(`<a class="nav-link" href="#runs-panel">📚 历史契约</a>`);
+  }
+  if (scope === 'contract') {
+    links.push(`<a class="nav-link" href="dashboard.html">↩ 返回项目总遥测</a>`);
+  }
+  nav.innerHTML = links.join('');
+}
+
+function renderRunsIndex(t, highlightTask) {
+  const runs = t.runs || [];
+  const title = document.getElementById('runs-title');
+  const panel = document.getElementById('runs-panel');
+  if (!runs.length) {
+    title.style.display = 'none';
+    panel.style.display = 'none';
+    return;
+  }
+  title.style.display = '';
+  panel.style.display = '';
+  const rows = [...runs].reverse().map(r => {
+    const tid = r.task_id || '—';
+    const href = contractHtmlName(tid);
+    const cur = highlightTask && tid === highlightTask ? ' class="current"' : '';
+    const when = r.collected_at ? new Date(r.collected_at).toLocaleString() : '—';
+    return `<tr${cur}>
+      <td><a href="${href}">${tid}</a></td>
+      <td>${when}</td>
+      <td>${r.goal_accuracy || '—'}</td>
+      <td>${r.first_pass_rate || '—'}</td>
+      <td>${r.autonomy_score || '—'}</td>
+      <td><a href="${href}">打开单次 →</a></td>
+    </tr>`;
+  }).join('');
+  document.getElementById('runs-table').innerHTML = `
+    <table>
+      <tr style="color:var(--text-dim);font-size:0.65rem;">
+        <th style="text-align:left">契约</th>
+        <th style="text-align:left">采集时间</th>
+        <th style="text-align:left">准确率</th>
+        <th style="text-align:left">首次成功</th>
+        <th style="text-align:left">自主性</th>
+        <th></th>
+      </tr>
+      ${rows}
+    </table>
+    <div class="meta" style="margin-top:8px;">共 ${runs.length} 次契约 · 每一行均可点击打开对应 dashboard-T-XXX.html 独立大屏（纯静态，无需 Server）</div>
+  `;
+}
+
+
+function renderCertificateEligibility(t) {
+  const el = document.getElementById('cert-banner');
+  if (!el) return;
+  const ce = t.certificate_eligibility || null;
+  // 兼容：若无字段，前端按遥测自算（与 portal eligibility 对齐）
+  const computed = ce || computeCertEligibilityClient(t);
+  const banner = document.getElementById('cert-banner');
+  const title = document.getElementById('cert-title');
+  const desc = document.getElementById('cert-desc');
+  const reasons = document.getElementById('cert-reasons');
+  const metrics = document.getElementById('cert-metrics');
+  const cta = document.getElementById('cert-cta');
+
+  const what = computed.what_is_it || (
+    '项目自治成熟度证书（AASC Project Autonomy Certificate）是组织在智能体敏捷（Agentic Agile）成熟度模型上达到 L3 受控自治 或 L4 自治超进化 后，可申请的项目级认证。证书针对「项目」而非个人；需在<a href="http://agentic.iloveagile.me/">Agentic Agile 智能体敏捷体系认证中心网站</a>申请并签发，可下载 PDF。L1/L2 不能申请证书——仅用本仪表盘作成长反馈。'
+  );
+  desc.innerHTML = what;
+
+  const m = computed.metrics || {};
+  metrics.innerHTML = `
+    <span>自主性 <b>${(m.autonomy_score ?? 0).toFixed?.(1) ?? m.autonomy_score ?? '—'}</b></span>
+    <span>任务数 <b>${m.tasks_completed ?? '—'}</b></span>
+    <span>首次成功 <b>${m.first_pass_rate != null ? (m.first_pass_rate * 100).toFixed(0) + '%' : '—'}</b></span>
+    <span>MUST <b>${m.must_pass_rate != null ? (m.must_pass_rate * 100).toFixed(0) + '%' : '—'}</b></span>
+    <span>自愈 <b>${m.auto_heal_rate != null ? (m.auto_heal_rate * 100).toFixed(0) + '%' : '—'}</b></span>
+  `;
+
+  const rs = computed.reasons || [];
+  reasons.innerHTML = rs.map(r => `<li>${r}</li>`).join('');
+
+  const eligible = !!computed.eligible;
+  banner.className = 'cert-banner ' + (eligible ? 'eligible' : 'ineligible');
+  title.innerHTML = eligible
+    ? `🏅 ${computed.label || ('可申请 ' + (computed.suggested_level || '') + ' 证书')}`
+    : `🏅 项目自治成熟度证书 · ${computed.label || '未达 L3/L4 发证门槛'}`;
+
+  // 默认门户申请页；可通过 localStorage 覆盖（多环境）
+  let applyUrl = computed.apply_url || 'http://agentic.iloveagile.com/project-autonomy-certificate/apply';
+  try {
+    const override = localStorage.getItem('aasc_cert_apply_url');
+    if (override) applyUrl = override;
+  } catch (e) {}
+
+  if (eligible && computed.cta_enabled !== false) {
+    cta.className = 'cert-cta enabled';
+    cta.textContent = computed.cta_text || ('申请 ' + (computed.suggested_level || '') + ' 项目自治证书 →');
+    cta.href = applyUrl;
+    cta.setAttribute('aria-disabled', 'false');
+    cta.removeAttribute('tabindex');
+  } else {
+    cta.className = 'cert-cta disabled';
+    cta.textContent = computed.cta_text || '达到 L3 后可申请证书';
+    cta.href = '#';
+    cta.setAttribute('aria-disabled', 'true');
+    cta.setAttribute('tabindex', '-1');
+    cta.onclick = function(e) { e.preventDefault(); return false; };
+  }
+}
+
+/** 无 certificate_eligibility 字段时的前端兜底（与 collect_telemetry 一致） */
+function computeCertEligibilityClient(t) {
+  const ga = (t.value || {}).goal_accuracy || {};
+  const fp = (t.value || {}).first_pass_rate || {};
+  const cap = t.capability || {};
+  const ah = cap.auto_heal_rate || {};
+  const mp = cap.must_pass_rate || {};
+  const au = cap.autonomy_score || {};
+  const autonomy = +(au.value || 0);
+  const tasks = +(ga.tasks_completed || 0);
+  const firstPass = +(fp.value || 0);
+  const mustPass = +(mp.value || 0);
+  const autoHeal = +(ah.value || 0);
+  const apply_url = 'http://agentic.iloveagile.com/project-autonomy-certificate/apply';
+  const what_is_it =
+    '项目自治成熟度证书（AASC Project Autonomy Certificate）是组织在智能体敏捷（Agentic Agile）成熟度模型上达到 L3 受控自治 或 L4 自治超进化 后，可申请的项目级认证。证书针对「项目」而非个人；需在<a href="http://agentic.iloveagile.me/">Agentic Agile 智能体敏捷体系认证中心网站</a>申请并签发，可下载 PDF。L1/L2 不能申请证书——仅用本仪表盘作成长反馈。';
+  if (autonomy >= 80 && tasks >= 15 && firstPass >= 0.9 && mustPass >= 0.99 && autoHeal >= 0.8) {
+    return {
+      eligible: true, suggested_level: 'L4', label: '可申请 L4 自治超进化证书',
+      cta_enabled: true, cta_text: '申请 L4 项目自治证书 →', apply_url, what_is_it,
+      reasons: ['遥测达标：autonomy≥80, tasks≥15, first_pass≥90%, must≥99%, auto_heal≥80%'],
+      metrics: { autonomy_score: autonomy, tasks_completed: tasks, first_pass_rate: firstPass, must_pass_rate: mustPass, auto_heal_rate: autoHeal },
+    };
+  }
+  if (autonomy >= 60 && tasks >= 10 && firstPass >= 0.7 && mustPass >= 0.95) {
+    return {
+      eligible: true, suggested_level: 'L3', label: '可申请 L3 受控自治证书',
+      cta_enabled: true, cta_text: '申请 L3 项目自治证书 →', apply_url, what_is_it,
+      reasons: ['遥测达标（L3）'],
+      metrics: { autonomy_score: autonomy, tasks_completed: tasks, first_pass_rate: firstPass, must_pass_rate: mustPass, auto_heal_rate: autoHeal },
+    };
+  }
+  const gaps = [];
+  if (autonomy < 60) gaps.push('autonomy=' + autonomy.toFixed(1) + '(需≥60)');
+  if (tasks < 10) gaps.push('tasks=' + tasks + '(需≥10)');
+  if (firstPass < 0.7) gaps.push('first_pass=' + (firstPass*100).toFixed(0) + '%(需≥70%)');
+  if (mustPass < 0.95) gaps.push('must_pass=' + (mustPass*100).toFixed(0) + '%(需≥95%)');
+  return {
+    eligible: false, suggested_level: null, label: '未达 L3/L4 发证门槛',
+    cta_enabled: false, cta_text: '达到 L3 后可申请证书', apply_url, what_is_it,
+    reasons: ['未达到 L3 门槛'].concat(gaps),
+    metrics: { autonomy_score: autonomy, tasks_completed: tasks, first_pass_rate: firstPass, must_pass_rate: mustPass, auto_heal_rate: autoHeal },
+  };
+}
+
+function render(data, mode) {
+  const t = data;
+  const meta = t.meta || {};
+  const now = meta.collected_at ? new Date(meta.collected_at).toLocaleString() : '—';
+  const scope = meta.scope || mode || 'project';
+  const taskLabel = meta.task_id ? ` · 契约 ${meta.task_id}` : '';
+
+  document.getElementById('meta-line').textContent =
+    `项目: ${meta.project || '—'} · 采集: ${now} · 模型: ${meta.model || 'legacy'} · 范围: ${scope}${taskLabel}`;
+
+  renderNav(t, mode);
+  // 顶部：项目自治证书资格（达标可点进申请页；未达标灰色禁用）
+  renderCertificateEligibility(t);
+  // 项目视图展示 runs 索引；单次视图只展示跳转，也可列出摘要
+  if (scope === 'project') {
+    renderRunsIndex(t, meta.latest_task_id);
+  } else {
+    // 单次：隐藏完整索引，或加载项目 file 补索引——简单隐藏
+    document.getElementById('runs-title').style.display = 'none';
+    document.getElementById('runs-panel').style.display = 'none';
+  }
+
+  // Evidence badge
+  const badge = document.getElementById('evidence-badge');
+  const ev = (t.governance || {}).evidence_status || 'UNKNOWN';
+  const evMap = {
+    'READY_FOR_HITL': { text: '✅ READY FOR HITL', cls: 'badge-pass' },
+    'UNEVALUATED': { text: '⏭ UNEVALUATED', cls: 'badge-warn' },
+    'BLOCKED': { text: '⛔ BLOCKED', cls: 'badge-fail' },
+  };
+  const evInfo = evMap[ev] || { text: '❓ ' + ev, cls: 'badge-fail' };
+  badge.textContent = evInfo.text;
+  badge.className = 'badge ' + evInfo.cls;
+
+  // ── Layer 1: 价值层 KPI ──
+  const v = t.value || {};
+  const ga = v.goal_accuracy || {};
+  const fp = v.first_pass_rate || {};
+  const cr = v.compound_roi || {};
+
+  document.getElementById('value-kpi').innerHTML = `
+    <div class="card">
+      <h3>🎯 目标准确率</h3>
+      <div class="value" style="color:${healthColor(ga.health)}">${ga.display || 'N/A'}</div>
+      <div class="sub">${ga.tasks_completed || 0}/${ga.tasks_assigned || 0} 任务正确完成</div>
+      <span class="tag ${healthTag(ga.health)}">${ga.health || 'N/A'}</span>
+    </div>
+    <div class="card">
+      <h3>✨ 首次成功率</h3>
+      <div class="value" style="color:${fp.value >= 0.7 ? 'var(--green)' : fp.value >= 0.5 ? 'var(--amber)' : 'var(--red)'}">${fp.display || 'N/A'}</div>
+      <div class="sub">${fp.tasks_first_pass || 0}/${fp.tasks_assigned || 0} 一次通过</div>
+      <div class="sub" style="color:var(--text-dim)">${fp.impact_note || ''}</div>
+    </div>
+    <div class="card">
+      <h3>💵 复合 ROI</h3>
+      <div class="value" style="color:${healthColor(cr.health)}">${cr.display || 'N/A'}</div>
+      <div class="sub">含失败折现系数</div>
+      <span class="tag ${healthTag(cr.health)}">${cr.health || 'N/A'}</span>
+    </div>
+    <div class="card">
+      <h3>📉 失败折现率</h3>
+      <div class="value" style="color:var(--amber)">${cr.breakdown ? (cr.breakdown.failure_rate * 100).toFixed(1) + '%' : 'N/A'}</div>
+      <div class="sub">任务失败率（需人工返工）</div>
+    </div>
+  `;
+
+  // ROI 明细
+  if (cr.breakdown) {
+    document.getElementById('roi-breakdown').innerHTML = `
+      <table>
+        <tr><td>节省人力（原始）</td><td style="text-align:right">¥${cr.breakdown.saved_labor_raw.toLocaleString()}</td></tr>
+        <tr><td>失败折现率</td><td style="text-align:right;color:var(--amber)">${(cr.breakdown.failure_rate * 100).toFixed(1)}%</td></tr>
+        <tr><td>折现后收益</td><td style="text-align:right;color:var(--green)">¥${cr.breakdown.discounted_savings.toLocaleString()}</td></tr>
+        <tr><td>AI 工具月成本</td><td style="text-align:right">¥${cr.breakdown.ai_monthly_cost.toLocaleString()}</td></tr>
+        <tr style="font-weight:700"><td>复合 ROI</td><td style="text-align:right;color:${healthColor(cr.health)}">${cr.display}</td></tr>
+      </table>
+      <div style="font-size:0.65rem;color:var(--text-dim);margin-top:8px;">${cr.note || ''}</div>
+    `;
+  } else {
+    document.getElementById('roi-breakdown').innerHTML =
+      '<div style="color:var(--text-dim);font-size:0.75rem;">需要 --human-hourly-rate 等参数</div>';
+  }
+
+  // 准确率进度条
+  document.getElementById('accuracy-bars').innerHTML = `
+    <div style="margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;font-size:0.7rem;">
+        <span>目标准确率</span><span style="color:${healthColor(ga.health)}">${ga.display || 'N/A'}</span>
+      </div>
+      ${pctBar((ga.value || 0) * 100, 100, p => p >= 80 ? 'var(--green)' : p >= 60 ? 'var(--amber)' : 'var(--red)')}
+    </div>
+    <div style="margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;font-size:0.7rem;">
+        <span>首次成功率</span><span style="color:${(fp.value || 0) >= 0.7 ? 'var(--green)' : 'var(--amber)'}">${fp.display || 'N/A'}</span>
+      </div>
+      ${pctBar((fp.value || 0) * 100, 100, p => p >= 70 ? 'var(--green)' : p >= 50 ? 'var(--amber)' : 'var(--red)')}
+    </div>
+    <div style="font-size:0.65rem;color:var(--text-dim);margin-top:8px;">
+      L3 就绪线: 80% &nbsp;|&nbsp; L2 基线: 60%
+    </div>
+  `;
+
+  // ── Layer 2: 能力层 KPI ──
+  const cap = t.capability || {};
+  const ah = cap.auto_heal_rate || {};
+  const au = cap.autonomy_score || {};
+  const hl = cap.hitl_escalation_rate || {};
+  const mp = cap.must_pass_rate || {};
+
+  document.getElementById('capability-kpi').innerHTML = `
+    <div class="card">
+      <h3>🔧 约束自愈率</h3>
+      <div class="value" style="color:${healthColor(ah.health)}">${ah.display || 'N/A'}</div>
+      <div class="sub">${ah.auto_healed || 0}/${ah.failures_total || 0} 自动修复</div>
+      <span class="tag ${healthTag(ah.health)}">${ah.health || 'N/A'}</span>
+    </div>
+    <div class="card">
+      <h3>🤖 自主性评分</h3>
+      <div class="value" style="color:${healthColor(au.health)}">${au.display || 'N/A'}</div>
+      <div class="sub">自愈(40%) + MUST(35%) + 低HITL(25%)</div>
+      <span class="tag ${healthTag(au.health)}">${au.health || 'N/A'}</span>
+    </div>
+    <div class="card">
+      <h3>🔔 HITL 升级率</h3>
+      <div class="value" style="color:${healthColor(hl.health)}">${hl.display || 'N/A'}</div>
+      <div class="sub">${hl.hitl_count || 0} 次 / ${hl.execution_rounds || 0} 轮</div>
+      <span class="tag ${healthTag(hl.health)}">${hl.health || 'N/A'}</span>
+    </div>
+    <div class="card">
+      <h3>🛡️ MUST 通过率</h3>
+      <div class="value" style="color:${(mp.value || 0) >= 0.95 ? 'var(--green)' : 'var(--red)'}">${mp.display || 'N/A'}</div>
+      <div class="sub">${mp.must_passed || 0}/${mp.must_total || 0} MUST 通过</div>
+    </div>
+  `;
+
+  // ── Layer 3: 效率层 ──
+  const eff = t.efficiency || {};
+  const cc = eff.context_compression || {};
+  const te = eff.token_efficiency || {};
+  const ee = eff.execution_efficiency || {};
+
+  document.getElementById('efficiency-kpi').innerHTML = `
+    <div class="card">
+      <h3>📐 上下文压缩比</h3>
+      <div class="value" style="color:${healthColor(cc.health)}">${cc.display || 'N/A'}</div>
+      <div class="sub">${cc.input_tokens || 0} → ${cc.output_tokens || 0} tokens</div>
+      <span class="tag ${healthTag(cc.health)}">${cc.health || 'N/A'}</span>
+      <div class="sub" style="color:var(--text-dim);margin-top:4px;">${cc.note || ''}</div>
+    </div>
+    <div class="card">
+      <h3>📊 Token 效率</h3>
+      <div class="value" style="color:${healthColor(te.health)}">${te.tokens_per_task ? te.tokens_per_task.toLocaleString() : 'N/A'}<span class="unit">tok/任务</span></div>
+      <div class="sub">总计 ${(te.total_tokens || 0).toLocaleString()} tokens / ${te.total_tasks || 0} 任务</div>
+      <span class="tag ${healthTag(te.health)}">${te.health || 'N/A'}</span>
+    </div>
+    <div class="card">
+      <h3>🔄 执行效率</h3>
+      <div class="value" style="color:${healthColor(ee.health)}">${ee.tasks_per_round || 'N/A'}<span class="unit">任务/轮</span></div>
+      <div class="sub">${ee.tasks_completed || 0} 任务 / ${ee.execution_rounds || 0} 轮</div>
+      <span class="tag ${healthTag(ee.health)}">${ee.health || 'N/A'}</span>
+    </div>
+  `;
+
+  // ── Layer 4: 进化层 ──
+  const evo = t.evolution || {};
+  const kc = evo.knowledge_crystallization || {};
+
+  document.getElementById('evolution-panel').innerHTML = `
+    <div class="card">
+      <h3>🧠 知识沉淀率</h3>
+      <div style="display:flex;align-items:center;gap:16px;">
+        <div class="value" style="color:${healthColor(kc.health)}">${kc.display || 'N/A'}</div>
+        <span class="tag ${healthTag(kc.health)}">${kc.health || 'N/A'}</span>
+      </div>
+      <div class="sub" style="margin-top:8px;">
+        本周期新增 <b>${kc.new_patterns_this_cycle || 0}</b> 个模式 ·
+        累积 <b>${kc.total_patterns_accumulated || 0}</b> 个模式
+      </div>
+      <div class="sub" style="color:var(--text-dim);margin-top:4px;">${kc.note || ''}</div>
+    </div>
+    <div class="card">
+      <h3>📈 进化趋势</h3>
+      <div style="color:var(--text-dim);font-size:0.75rem;line-height:1.6;">
+        ${evo.trend_note || '趋势数据需多周期累积后分析。'}
+      </div>
+      <div style="margin-top:10px;font-size:0.65rem;color:var(--text-dim);">
+        💡 建议每次 SCOPE-V 后采集遥测数据，积累 ≥5 个周期后观察趋势
+      </div>
+    </div>
+  `;
+
+  // ── 传统指标（兼容） ──
+  const pipe = t.pipeline || {}; const tests = pipe.tests || {};
+  const qual = t.quality || {}; const cov = qual.coverage || {};
+  const perf = t.performance || {}; const bench = perf.benchmark || {};
+  const cost = t.cost || {};
+  const gov = t.governance || {};
+
+  document.getElementById('pipeline-table').innerHTML = `
+    <table>
+      <tr><td>总测试数</td><td style="text-align:right;font-weight:700">${tests.total || 0}</td></tr>
+      <tr><td>通过</td><td style="text-align:right;color:var(--green)">${tests.passed || 0}</td></tr>
+      <tr><td>失败</td><td style="text-align:right;color:var(--red)">${tests.failed || 0}</td></tr>
+      <tr><td>错误</td><td style="text-align:right;color:var(--amber)">${tests.errors || 0}</td></tr>
+      <tr><td>状态</td><td style="text-align:right;color:${tests.status === 'NO_TEST_SUITE' ? 'var(--amber)' : tests.status === 'PASS' ? 'var(--green)' : (tests.status === 'FAIL' || tests.status === 'PARTIAL') ? 'var(--red)' : 'var(--text-dim)'}">${tests.status || '—'}${tests.runner ? ' · ' + tests.runner : ''}</td></tr>
+      <tr><td colspan="2">${pctBar(tests.passed || 0, tests.total || 1, p => p >= 90 ? 'var(--green)' : p >= 70 ? 'var(--amber)' : 'var(--red)')}</td></tr>
+    </table>
+  `;
+
+  const gateDefs = [
+    { id: 'G1', name: 'G1 文件结构' },
+    { id: 'G2', name: 'G2 数据完整性' },
+    { id: 'G3', name: 'G3 行为正确' },
+    { id: 'G4', name: 'G4 质量达标' },
+    { id: 'G5', name: 'G5 过程合规' },
+    { id: 'G6', name: 'G6 安全合规 (SEC)' },
+    { id: 'G7', name: 'G7 可靠性合规 (REL)' },
+    { id: 'G8', name: 'G8 可观测性合规 (OBS)' },
+  ];
+  // 优先用逐门禁状态（支持非连续通过 / 未评估 null）；无则退回累计式
+  let gates;
+  if (gov.gates && Array.isArray(gov.gates) && gov.gates.length) {
+    const gateMap = {};
+    gov.gates.forEach(g => { gateMap[g.id] = g; });
+    gates = gateDefs.map(d => {
+      const g = gateMap[d.id];
+      return {
+        name: g && g.name ? `${d.id} ${g.name}` : d.name,
+        passed: g ? g.passed : ((gov.gates_passed || 0) >= parseInt(d.id.slice(1)) ? true : null),
+        detail: (g && g.detail) || null,
+      };
+    });
+  } else {
+    gates = gateDefs.map(d => ({ name: d.name, passed: (gov.gates_passed || 0) >= parseInt(d.id.slice(1)) ? true : null, detail: null }));
+  }
+  const passedCount = gates.filter(g => g.passed === true).length;
+  const skippedCount = gates.filter(g => g.passed === null).length;
+  const totalCount = gates.length;
+  const webNote = (gov.gates_total || 0) >= 8 ? ' · 含 Web 扩展 G6-G8' : '';
+  const gateDetails = gates.filter(g => g.detail).map(g => `<tr><td style="font-size:0.62rem;color:var(--text-dim);">↳ ${g.name}: ${g.detail}</td></tr>`).join('');
+  document.getElementById('gates-table').innerHTML = `
+    <table>
+      ${gates.map(g => `
+        <tr><td>${g.passed === true ? '✅' : (g.passed === false ? '⬜' : '⏭')} ${g.name}</td></tr>
+      `).join('')}
+      ${gateDetails}
+      <tr style="font-weight:700"><td>通过: ${passedCount}/${totalCount}${webNote}${skippedCount ? ` · 未评估 ${skippedCount}` : ''}</td></tr>
+    </table>
+  `;
+
+  document.getElementById('perf-table').innerHTML = `
+    <table>
+      <tr><td>p50</td><td style="text-align:right">${(bench.p50_ms || 0).toFixed(4)} ms</td></tr>
+      <tr><td style="font-weight:700;color:var(--cyan)">p95</td>
+        <td style="text-align:right;font-weight:700;color:${(bench.p95_ms || 0) <= (bench.threshold_ms || 2) ? 'var(--green)' : 'var(--red)'}">${(bench.p95_ms || 0).toFixed(4)} ms</td></tr>
+      <tr><td>p99</td><td style="text-align:right">${(bench.p99_ms || 0).toFixed(4)} ms</td></tr>
+      <tr><td>阈值</td><td style="text-align:right">≤ ${bench.threshold_ms || 2} ms</td></tr>
+    </table>
+  `;
+
+  const tokenSrc = cost.token_source || 'estimated';
+  const srcBadge = tokenSrc.startsWith('measured')
+    ? '<span style="color:#22c55e;font-size:11px">● 实测 ocusage</span>'
+    : (tokenSrc.startsWith('mixed')
+      ? '<span style="color:#f59e0b;font-size:11px">● 混合(实测+估算)</span>'
+      : '<span style="color:#94a3b8;font-size:11px">● 人工估算</span>');
+  document.getElementById('cost-table').innerHTML = `
+    <table>
+      <tr><td>Token 消耗 ${srcBadge}</td><td style="text-align:right">${(cost.token_usage || 0).toLocaleString()}</td></tr>
+      <tr><td>执行轮次</td><td style="text-align:right">${cost.execution_rounds || 0}</td></tr>
+      <tr><td>HITL 次数</td><td style="text-align:right">${cost.hitl_count || 0}</td></tr>
+      <tr><td>估算成本</td><td style="text-align:right">~$${(cost.estimated_cost_usd || 0).toFixed(4)} USD</td></tr>
+    </table>
+  `;
+}
+
+function loadDemo() {
+  console.warn('未内嵌遥测数据：请先运行 collect_telemetry.py（会写入 dashboard*.html）');
+  render({
+    meta: {
+      project: 'DEMO', collected_at: new Date().toISOString(), version: '2.2', model: '4-layer-9-dim',
+      scope: 'project', task_id: null, run_count: 2,
+      links: { project_telemetry: 'telemetry.json' },
+      latest_task_id: 'T-001',
+    },
+    runs: [
+      { task_id: 'T-001', collected_at: new Date().toISOString(), goal_accuracy: '100%', first_pass_rate: '100%', autonomy_score: '90/100' },
+      { task_id: 'T-002', collected_at: new Date().toISOString(), goal_accuracy: '90%', first_pass_rate: '70%', autonomy_score: '75/100' },
+    ],
+    value: {
+      goal_accuracy: { value: 0.90, display: '90.0%', tasks_assigned: 10, tasks_completed: 9, health: 'L3_READY', threshold: { l3_ready: 0.80, l2_collab: 0.60 } },
+      first_pass_rate: { value: 0.70, display: '70.0%', tasks_first_pass: 7, tasks_assigned: 10, impact_note: '演示数据' },
+      compound_roi: { value: 200.0, display: '200.0%', breakdown: { saved_labor_raw: 200000, failure_rate: 0.10, discounted_savings: 180000, ai_monthly_cost: 60000 }, health: 'POSITIVE', note: '演示' }
+    },
+    capability: {
+      auto_heal_rate: { value: 0.60, display: '60.0%', auto_healed: 3, failures_total: 5, health: 'GOOD', note: '' },
+      autonomy_score: { value: 75.7, display: '75.7/100', health: 'L2_MATURE', components: { auto_heal_weight: 0.4, must_pass_weight: 0.35, hitl_weight: 0.25 } },
+      hitl_escalation_rate: { value: 0.333, display: '33.3%', hitl_count: 2, execution_rounds: 6, health: 'HIGH_TOUCH' },
+      must_pass_rate: { value: 1.0, display: '100.0%', must_passed: 20, must_total: 20 }
+    },
+    efficiency: {
+      context_compression: { ratio: 5.3, display: '5.3:1', input_tokens: 8000, output_tokens: 1500, health: 'EXCELLENT', note: '' },
+      token_efficiency: { tokens_per_task: 4500, total_tokens: 45000, total_tasks: 10, health: 'EFFICIENT' },
+      execution_efficiency: { tasks_per_round: 1.5, tasks_completed: 9, execution_rounds: 6, health: 'NORMAL' }
+    },
+    evolution: {
+      knowledge_crystallization: { rate: 0.25, display: '25.0%', new_patterns_this_cycle: 3, total_patterns_accumulated: 12, health: 'ACTIVE_LEARNING', note: '' },
+      trend_note: '纯静态：双击 governance/dashboard.html 即可。'
+    },
+    pipeline: { tests: { total: 0, passed: 0, failed: 0, errors: 0, pass_rate: 0 } },
+    quality: { coverage: { line_rate: 0, threshold: 90.0, status: 'N/A' } },
+    performance: { benchmark: { warmup: 0, samples: 0, p50_ms: 0, p95_ms: 0, p99_ms: 0, max_ms: 0, threshold_ms: 2.0, status: 'N/A' } },
+    cost: { token_usage: 0, execution_rounds: 0, hitl_count: 0, hitl_rate: 0, estimated_cost_usd: 0 },
+    governance: { gates_passed: 0, gates_total: 9, must_constraints: 0, must_failed: 0, contract_pass_rate: 0, evidence_status: 'UNKNOWN' }
+  }, 'project');
+}
+
+// 纯静态：只读内嵌 #telemetry-data（由 collect_telemetry 写入）
+(function boot() {
+  const data = readEmbeddedTelemetry();
+  if (data) {
+    const scope = (data.meta && data.meta.scope) || 'project';
+    render(data, scope);
+    return;
+  }
+  loadDemo();
+})();
+</script>
+</body>
+</html>

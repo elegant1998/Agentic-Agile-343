@@ -1,0 +1,211 @@
+# 跨工具治理协议（Protocol）
+# 版本: 1.0
+# 定位: 工具无关的治理中枢。不依赖任何特定语言运行时，所有 AI 工具均可解析。
+# 维护者: 全局 OA（通常为 Tech Lead）
+#
+# 使用场景:
+#   - 5 人 × 5 模块 × 3 种 AI 工具并行开发
+#   - 跨模块接口契约定义
+#   - 集成 DAG 编排
+#   - 全局约束下发
+#
+# 工具适配:
+#   - WorkBuddy: 直接使用，harness.py --protocol 加载
+#   - Codex (Copilot): 读取此文件注入 .github/copilot-instructions.md
+#   - Claude Code: 读取此文件注入 CLAUDE.md
+
+project: YOUR_PROJECT_NAME
+version: "1.0"
+
+# ═══════════════════════════════════════════════════════════
+# §1 模块清单
+# ═══════════════════════════════════════════════════════════
+# 全局 OA 维护。每个模块一行，定义负责人、工具、代码仓库、约束文件路径。
+
+modules:
+  - id: module_a                     # 模块唯一标识
+    name: "模块A"                    # 人类可读名称
+    owner: "[姓名]"                  # 模块 OA（负责人）
+    tool: workbuddy                  # 使用的 AI 工具: workbuddy | codex | claude-code | other
+    repo: "git@github.com:team/module-a.git"
+    constraints_ref: "modules/module_a/constraints.yaml"  # 相对于项目根目录
+    description: "[一句话描述模块职责]"
+
+  - id: module_b
+    name: "模块B"
+    owner: "[姓名]"
+    tool: codex
+    repo: "git@github.com:team/module-b.git"
+    constraints_ref: "modules/module_b/constraints.yaml"
+    description: "[一句话描述模块职责]"
+
+  # 按需增删模块。典型电商: user / product / order / payment / logistics
+
+# ═══════════════════════════════════════════════════════════
+# §2 全局约束（所有模块必须遵守）
+# ═══════════════════════════════════════════════════════════
+# 这些约束优先级高于模块级 constraints.yaml。
+# 模块 OA 在裁剪上下文时必须注入。
+
+global_constraints:
+  - id: GC-01
+    domain: STYLE
+    level: MUST
+    rule: "API 响应统一格式 {\"code\":0,\"data\":T,\"message\":\"\"}"
+    reason: "前端拦截器依赖 code 字段判断成功/失败"
+    applies_to: [all]
+
+  - id: GC-02
+    domain: STYLE
+    level: MUST
+    rule: "认证方式 JWT Bearer Token，Header: Authorization: Bearer <token>"
+    reason: "统一认证，避免各模块自建认证体系"
+    applies_to: [all]
+
+  - id: GC-03
+    domain: DATA
+    level: MUST
+    rule: "金额字段一律使用整数（分为单位），禁止 float/double"
+    reason: "浮点精度问题导致财务对账失败"
+    applies_to: [order, payment]  # 仅适用于有金额的模块
+
+  - id: GC-04
+    domain: PROC
+    level: MUST
+    rule: "Git 提交格式: <type>(<module>): <description>"
+    reason: "统一提交历史，便于跨模块追溯"
+    applies_to: [all]
+
+  # 按需追加全局约束
+
+# ═══════════════════════════════════════════════════════════
+# §3 跨模块接口契约（Cross-Module Contracts）
+# ═══════════════════════════════════════════════════════════
+# 定义模块间的 API 依赖。由全局 OA 维护，provider 模块 OA 确认。
+# verify_cross_module.py 自动验证。
+
+cross_module_contracts:
+  - id: XC-001
+    provider: module_a          # 谁提供这个接口
+    consumer: [module_b]        # 谁调用这个接口
+    endpoint: "POST /api/xxx/yyy"
+    description: "[接口用途]"
+    spec:
+      request:
+        field1: "type"          # 如 user_id: "int"
+        field2: "type"
+      response:
+        code: 0
+        data:
+          field1: "type"
+    sla:
+      p95_latency_ms: 100       # P95 延迟上限
+      availability: "99.9%"     # 可用性要求
+    breaking_change_policy:
+      # 什么变更算破坏性: 删除字段 / 修改字段类型 / 修改错误码语义
+      - "删除 response 中的任何字段"
+      - "修改 request 字段类型"
+      - "修改 HTTP 状态码语义"
+
+  # 按需追加跨模块契约。每个 provider→consumer 关系一条。
+
+# ═══════════════════════════════════════════════════════════
+# §4 集成 DAG（Integration DAG）
+# ═══════════════════════════════════════════════════════════
+# 定义模块间集成顺序。graph_engine.py --cross-module 读取。
+# 全局 OA 维护，随项目推进更新。
+
+integration_dag:
+  phases:
+    - id: phase-1
+      name: "独立开发"
+      description: "无相互依赖的模块可并行开发"
+      parallel: [module_a, module_b]  # 列出此阶段所有并行模块
+      depends_on: []
+      gate: null
+
+    - id: phase-2
+      name: "依赖开发"
+      description: "依赖上游模块完成后才能开始"
+      parallel: []
+      depends_on: [module_a]
+      gate: null
+
+    - id: phase-3
+      name: "集成测试"
+      description: "所有模块完成后进行跨模块集成测试"
+      parallel: []
+      depends_on: [module_a, module_b]  # 列出所有需集成的模块
+      gate: integration
+      checks:
+        - "verify_cross_module.py --all"
+        - "pytest tests/integration/"
+
+    - id: phase-4
+      name: "发布"
+      description: "集成测试通过后发布"
+      depends_on: [phase-3]
+      gate: release
+      checks:
+        - "aggregate_evidence.py --all --output RELEASE_Evidence_Bundle.md"
+
+# ═══════════════════════════════════════════════════════════
+# §5 治理自动化（工具无关版本）
+# ═══════════════════════════════════════════════════════════
+# 每个检查提供多语言等效命令。各 AI 工具自行选择可执行的版本。
+# 如果工具不支持任何自动化版本，降级为 manual。
+
+checks:
+  - id: "api-format"
+    desc: "API 响应格式统一为 {code, data, message}"
+    gate: G0
+    verify:
+      shell: "grep -r 'code.*data.*message' src/api/ | wc -l"
+      python: "python3 scripts/verify_contract.py --check api-format"
+      manual: "人工抽查 3 个 API 端点的响应格式"
+
+  - id: "no-hardcoded-secrets"
+    desc: "源代码中无硬编码密钥/令牌"
+    gate: G6
+    verify:
+      shell: "grep -rE '(password|secret|token|key)\\s*=\\s*[\"\\x27]' src/ --include='*.py' || true"
+      python: "python3 scripts/harness.py check --gate G6"
+      manual: "人工审查 src/ 目录"
+
+  - id: "test-coverage"
+    desc: "测试覆盖率 ≥ 80%"
+    gate: G4
+    verify:
+      shell: "pytest --cov=src --cov-fail-under=80 tests/"
+      python: "python3 -m pytest --cov=src --cov-fail-under=80 tests/"
+      manual: "运行测试套件并检查覆盖率报告"
+
+# ═══════════════════════════════════════════════════════════
+# §6 遥测上报规范
+# ═══════════════════════════════════════════════════════════
+# 每个模块在每个 SCOPE-V 周期结束后向全局 OA 上报遥测数据。
+# 格式统一为 JSON，字段定义见下。aggregate_evidence.py --merge 自动合并。
+
+telemetry_spec:
+  required_fields:
+    - module_id        # 模块 ID
+    - tool             # 使用的 AI 工具
+    - cycle            # SCOPE-V 周期编号
+    - tasks_total      # 总任务数
+    - tasks_completed  # 完成任务数
+    - first_pass_rate  # 首次成功率 (%)
+    - hitl_count       # HITL 次数
+    - token_usage      # Token 消耗
+    - gates_passed     # 通过门禁数
+    - gates_total      # 总门禁数
+  optional_fields:
+    - coverage_pct     # 测试覆盖率
+    - benchmark_p95_ms # 性能基准
+    - auto_heal_count  # 自动恢复次数
+    - issues_found     # 发现的问题数
+
+  # 上报文件路径约定:
+  # WorkBuddy:  governance/telemetry.json
+  # Codex:      .codex/telemetry.json
+  # CC:         .claude/telemetry.json
+  # 全局 OA 运行: aggregate_evidence.py --merge 自动发现上述路径

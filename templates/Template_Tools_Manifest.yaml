@@ -1,0 +1,236 @@
+# 工具清单（Tools Manifest）
+# 定义 AS（自治蜂群）可用的工具白名单、权限边界和能力矩阵。
+# 版本: 1.0
+# 
+# 用途:
+#   1. OA 在裁剪上下文时，根据任务类型选择对应的工具集
+#   2. audit_tools.py 审计 AS 实际工具调用是否在授权范围内
+#   3. HITL 触发条件：AS 调用未授权工具 → 立即暂停
+
+project: YOUR_PROJECT_NAME
+version: "1.0"
+
+# ─── 工具分类定义 ──────────────────────────────────────────
+
+tool_categories:
+  file_ops:
+    name: "文件操作"
+    description: "读取、写入、编辑项目文件"
+    risk_level: MEDIUM
+    requires_approval: false
+
+  shell_exec:
+    name: "Shell 执行"
+    description: "执行 bash 命令（编译、测试、安装依赖）"
+    risk_level: HIGH
+    requires_approval: true  # 危险命令需 IO 审批
+
+  network_io:
+    name: "网络 IO"
+    description: "HTTP 请求、API 调用、外部数据获取"
+    risk_level: HIGH
+    requires_approval: true
+
+  governance:
+    name: "治理操作"
+    description: "修改意图图谱、契约、约束矩阵等治理工件"
+    risk_level: CRITICAL
+    requires_approval: true
+
+  db_ops:
+    name: "数据库操作"
+    description: "数据库读写、迁移、种子数据"
+    risk_level: CRITICAL
+    requires_approval: true
+
+  test_ops:
+    name: "测试操作"
+    description: "运行测试、覆盖率、性能基准"
+    risk_level: LOW
+    requires_approval: false
+
+  artifact_ops:
+    name: "产物操作"
+    description: "生成构建产物、部署包、Docker 镜像"
+    risk_level: MEDIUM
+    requires_approval: true
+
+# ─── 工具白名单 ────────────────────────────────────────────
+
+tools:
+  # ── 文件操作 ──
+  - id: FILE_READ
+    name: "读取文件"
+    category: file_ops
+    description: "读取项目内任意文件内容"
+    scope: ["src/**", "tests/**", "governance/**", "docs/**", "scripts/**", "*.md", "*.yaml", "*.json", "*.toml", "*.cfg", "*.ini"]
+    forbidden: [".env", "*.pem", "*.key", "credentials.*", "secrets.*"]
+
+  - id: FILE_WRITE
+    name: "写入文件"
+    category: file_ops
+    description: "创建或覆盖项目文件"
+    scope: ["src/**", "tests/**", "governance/evidence/**", "docs/**", "scripts/**"]
+    forbidden: ["governance/Intent_Graph.md", "governance/contracts/Intent_Contract_*.md"]
+
+  - id: FILE_EDIT
+    name: "编辑文件"
+    category: file_ops
+    description: "精确字符串替换修改文件"
+    scope: ["src/**", "tests/**", "scripts/**"]
+    forbidden: ["governance/Intent_Graph.md"]
+
+  # ── Shell 执行 ──
+  - id: SHELL_TEST
+    name: "运行测试"
+    category: shell_exec
+    description: "执行 pytest、coverage 等测试命令"
+    allowed_commands: ["pytest", "python3 -m pytest", "coverage"]
+    forbidden_patterns: ["rm -rf", "sudo", "chmod 777", "> /dev/sda", "mkfs", "dd if=", ":(){ :|:& };:"]
+
+  - id: SHELL_BUILD
+    name: "构建与安装"
+    category: shell_exec
+    description: "安装依赖、构建项目"
+    allowed_commands: ["pip install", "npm install", "pnpm install", "yarn install", "make", "docker build"]
+    forbidden_patterns: ["pip install --break-system-packages", "npm install -g"]
+
+  - id: SHELL_GIT
+    name: "Git 操作"
+    category: shell_exec
+    description: "版本控制操作（提交需审批）"
+    allowed_commands: ["git status", "git diff", "git log", "git branch", "git add", "git commit", "git push", "git pull"]
+    requires_approval_for: ["git push --force", "git reset --hard", "git clean -fd"]
+
+  # ── 网络 IO ──
+  - id: NET_HTTP
+    name: "HTTP 请求"
+    category: network_io
+    description: "发起 HTTP/HTTPS 请求获取外部数据"
+    allowed_domains: []  # 由 OA 按任务配置
+    forbidden_domains: ["localhost", "127.0.0.1", "internal", ".local"]
+
+  - id: NET_SEARCH
+    name: "网络搜索"
+    category: network_io
+    description: "搜索引擎查询，获取最新信息"
+    allowed_domains: ["*"]  # 开放搜索
+
+  # ── 治理操作 ──
+  - id: GOV_SIGN
+    name: "签署契约"
+    category: governance
+    description: "在契约签署区添加 IO 签名"
+    requires_human: true  # 仅 IO 可执行
+
+  - id: GOV_UPDATE_GRAPH
+    name: "更新意图图谱"
+    category: governance
+    description: "修改意图图谱内容"
+    requires_human: true
+
+  # ── 数据库操作 ──
+  - id: DB_MIGRATE
+    name: "数据库迁移"
+    category: db_ops
+    description: "运行 alembic 迁移"
+    allowed_commands: ["alembic upgrade", "alembic downgrade", "alembic history", "alembic current"]
+
+  - id: DB_QUERY
+    name: "数据库查询"
+    category: db_ops
+    description: "执行只读 SQL 查询"
+    allowed_patterns: ["^SELECT ", "^EXPLAIN ", "^PRAGMA "]
+
+  # ── 测试操作 ──
+  - id: TEST_RUN
+    name: "执行测试套件"
+    category: test_ops
+    description: "运行 pytest 测试并收集结果"
+
+  - id: TEST_COVERAGE
+    name: "覆盖率报告"
+    category: test_ops
+    description: "生成测试覆盖率报告"
+
+  - id: TEST_BENCH
+    name: "性能基准"
+    category: test_ops
+    description: "运行性能 benchmark"
+
+  # ── 产物操作 ──
+  - id: ARTIFACT_PACKAGE
+    name: "打包构建产物"
+    category: artifact_ops
+    description: "生成 tar.gz/zip 构建包"
+
+  - id: ARTIFACT_DEPLOY
+    name: "部署"
+    category: artifact_ops
+    description: "部署到目标环境"
+    requires_approval: true
+    allowed_environments: ["uat", "staging"]  # 生产需额外审批
+    forbidden_environments: ["production", "prod"]
+
+# ─── 任务-工具能力矩阵 ─────────────────────────────────────
+
+# 定义每种任务类型需要的工具集
+task_tool_matrix:
+  init:
+    description: "项目初始化"
+    required_tools: [FILE_READ, FILE_WRITE, FILE_EDIT, SHELL_BUILD]
+    optional_tools: [NET_SEARCH]
+
+  design:
+    description: "架构设计"
+    required_tools: [FILE_READ, FILE_WRITE, NET_SEARCH]
+    optional_tools: [NET_HTTP]
+
+  implement:
+    description: "代码实现"
+    required_tools: [FILE_READ, FILE_WRITE, FILE_EDIT, SHELL_TEST, TEST_RUN, TEST_COVERAGE]
+    optional_tools: [DB_MIGRATE, DB_QUERY, SHELL_GIT]
+
+  test:
+    description: "测试验证"
+    required_tools: [FILE_READ, SHELL_TEST, TEST_RUN, TEST_COVERAGE, TEST_BENCH]
+    optional_tools: [DB_QUERY]
+
+  deploy:
+    description: "部署发布"
+    required_tools: [FILE_READ, SHELL_BUILD, ARTIFACT_PACKAGE, ARTIFACT_DEPLOY]
+    optional_tools: [DB_MIGRATE]
+    requires_io_approval: true
+
+  govern:
+    description: "治理维护"
+    required_tools: [FILE_READ, FILE_WRITE, GOV_UPDATE_GRAPH]
+    optional_tools: [GOV_SIGN]
+    requires_io_approval: true
+
+# ─── 权限边界规则 ──────────────────────────────────────────
+
+boundary_rules:
+  - id: BOUNDARY_FILESYSTEM
+    rule: "AS 不得读写项目根目录之外的任何文件"
+    enforcement: "audit_tools.py 检查所有 FILE_WRITE 的 scope"
+
+  - id: BOUNDARY_NETWORK
+    rule: "AS 不得访问内网地址和未经授权的域名"
+    enforcement: "audit_tools.py 检查所有 NET_HTTP 的 target"
+
+  - id: BOUNDARY_DB
+    rule: "AS 仅可执行 SELECT/EXPLAIN/PRAGMA 只读查询，写操作需 IO 审批"
+    enforcement: "audit_tools.py 检查所有 DB_QUERY 的 SQL 前缀"
+
+  - id: BOUNDARY_GOVERNANCE
+    rule: "AS 不得修改已签署的契约和约束矩阵的 MUST 级别"
+    enforcement: "harness.py + audit_tools.py"
+
+  - id: BOUNDARY_DEPLOY
+    rule: "AS 不得直接部署到生产环境"
+    enforcement: "audit_tools.py 检查 ARTIFACT_DEPLOY 的 environment 参数"
+
+  - id: BOUNDARY_SHELL
+    rule: "AS 不得执行破坏性 shell 命令（rm -rf, sudo, chmod 777 等）"
+    enforcement: "audit_tools.py 检查 SHELL_* 的 forbidden_patterns"

@@ -1,0 +1,68 @@
+# 意图契约示例（已填写最小可运行任务）
+# 拷贝本文件到 governance/contracts/Intent_Contract_T-001.yaml 即可作为起点。
+# 这是「社区版」示例：仅用基础字段，进阶字段（证据包 / 真实遥测）留待课程解锁。
+# 注：下方 AC 引用了假设存在的 cli.py / tests/，仅用于演示字段写法；替换为你自己的
+#     真实实现路径前，校验会按预期失败（提示「尚未实现」），属正常现象。
+
+metadata:
+  task_id: "T-001"
+  version: "1.0"
+  status: "signed"                       # 填完即签署
+  created_at: "2026-07-30T10:00:00+08:00"
+  confirmed_by: "IO-无敌哥"
+  intent_graph_ref: "governance/Intent_Graph.md"
+  constraint_ref: "governance/constraints.yaml"
+
+goal:
+  - "为内部日志分析 CLI 增加 `--format json` 输出选项"
+  - "默认仍为人类可读文本格式，向后兼容"
+
+not_goal:
+  - "不做 Web 界面（下一迭代）"
+  - "不做 CSV / XML 等其它格式"
+
+rules:
+  R-01: "json 输出必须是合法 JSON，且字段名稳定（contract / version / records）"
+  R-02: "不修改已有的文本输出形态，避免破坏现有脚本依赖"
+
+tdd_flow:
+  red:
+    command: "python3 -m pytest tests/test_cli.py -q"
+    expect: "新增的 test_json_format 失败（证明测试能捕获缺失）"
+    test_file: "tests/test_cli.py"
+  green:
+    command: "python3 -m pytest tests/test_cli.py -q"
+    expect: "全部 PASS"
+    target_coverage: 80
+  refactor:
+    command: "# 社区版无 reflect.py；此处留空，进阶课程解锁"
+    expect: "代码整洁即可"
+
+ac:
+  - id: "AC-01"
+    desc: "--format json 输出合法 JSON"
+    verify:
+      type: shell
+      command: "python cli.py sample.log --format json | python -c 'import sys,json;json.load(sys.stdin)'"
+  - id: "AC-02"
+    desc: "默认（无 --format）仍是文本"
+    verify:
+      type: shell
+      command: "python cli.py sample.log | grep -q 'records'"
+
+self_consistency:
+  expected_files:
+    - "cli.py"
+    - "tests/test_cli.py"
+  expected_endpoints: 0
+  router_path: "cli.py"
+  test_file: "tests/test_cli.py"
+
+risks_and_open_questions:
+  risks:
+    - id: "RISK-01"
+      description: "超大日志下 JSON 序列化内存占用未评估"
+      impact: "low"
+      mitigation: "先用标准 json.dumps，后续压测再优化"
+      owner: "OA"
+  open_questions: []

@@ -1,0 +1,110 @@
+# 意图契约模板（精简 YAML 格式）
+# 对应: US-XXX-001 ~ US-XXX-004
+# 目标域: your_domain
+# 版本: 1.3 — 增加 metadata + risks_and_open_questions（六部分对齐）
+
+# ─── 1. Metadata：这是哪个任务、哪个版本、谁确认的 ───────────
+metadata:
+  task_id: "T-XXX"                           # 稳定编号，便于证据引用
+  version: "1.0"                              # 契约版本号
+  status: "pending"                           # pending | signed | completed | archived
+  created_at: "2026-01-01T10:00:00+08:00"
+  confirmed_by: ""                            # IO 确认人（签署后填入）
+  intent_graph_ref: "governance/Intent_Graph.md"  # 来源图谱
+  constraint_ref: "governance/constraints.yaml"     # 关联约束矩阵
+
+# ─── 2. Goal：本轮要改变什么结果 ───────────────────────────
+goal:
+  - "实现功能 A：描述..."
+  - "实现功能 B：描述..."
+
+not_goal:
+  - "不做功能 X（P1，下一迭代）"
+  - "不做功能 Y"
+
+rules:
+  R-01: "业务规则描述"
+  R-02: "业务规则描述"
+
+# ─── TDD 流程定义 ──────────────────────────────────────────
+# 定义 Red-Green-Refactor 三步的具体操作
+tdd_flow:
+  # Red: 从 AC 生成测试骨架，运行应全部失败
+  red:
+    command: "python3 scripts/verify_contract.py --task T-XXX --generate-tests"
+    expect: "所有测试 FAIL（证明测试可捕获缺陷）"
+    test_file: "tests/test_your_domain.py"
+
+  # Green: 编写最小实现使测试通过
+  green:
+    command: "python3 -m pytest tests/test_your_domain.py -v"
+    expect: "所有测试 PASS"
+    target_coverage: 80
+
+  # Refactor: 重构 + 反思
+  refactor:
+    command: "python3 scripts/reflect.py --task T-XXX --feedback-to-graph"
+    expect: "代码整洁 + 反思已反哺图谱"
+
+ac:
+  - id: "AC-01"
+    desc: "所有 API 测试通过"
+    verify:
+      type: shell
+      command: "python3 -m pytest tests/ -q"
+
+  - id: "AC-02"
+    desc: "GET /api/health 返回 200"
+    verify:
+      type: http
+      method: GET
+      url: "/api/health"
+      expect:
+        status: 200
+        body_contains: "ok"
+
+  - id: "AC-03"
+    desc: "数据库初始数据存在"
+    verify:
+      type: db
+      engine: "sqlite:///test.db"
+      query: "SELECT COUNT(*) FROM your_table"
+      expect:
+        min_rows: 1
+
+  - id: "AC-04"
+    desc: "业务逻辑校验（自定义断言）"
+    verify:
+      type: assert
+      expression: "your_validation_function()"
+      setup: "from tests.helpers import your_validation_function"
+
+# self_consistency 字段供 self_consistency_check.py 使用
+self_consistency:
+  expected_files:
+    - "src/api/your_domain/router.py"
+    - "src/api/your_domain/service.py"
+    - "src/api/your_domain/schemas.py"
+    - "tests/test_your_domain.py"
+  expected_endpoints: 4
+  router_path: "src/api/your_domain/router.py"
+  test_file: "tests/test_your_domain.py"
+
+db_tables:
+  - "your_table: id, field1, field2"
+
+# ─── 6. Risks & Open Questions：哪些风险和未知不能让 AS 自行猜测 ──
+risks_and_open_questions:
+  risks:
+    - id: "RISK-01"
+      description: "外部支付渠道超时行为未确认"
+      impact: "high"                           # high | medium | low
+      mitigation: "保留 unknown 状态，转人工核对"
+      owner: "IO"                              # 谁来跟进
+  open_questions:
+    - id: "Q-01"
+      question: "退款计算分母用固定 30 天还是实际购买天数？"
+      blocker: true                            # 是否阻塞实现
+      asked_to: "IO"                           # 向谁提问
+      status: "open"                           # open | answered | resolved
+      answer: ""                               # 回答后填入
