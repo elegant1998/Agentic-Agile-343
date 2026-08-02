@@ -386,9 +386,9 @@ Agentic Agile 不是对管理学的修补，而是对软件研发工程的**重�
 
 ## 十、方法论提出者
 
-![image-20260720175007631](/Users/wanglijie/HappyLife/18-AI/Agentic-Agile/pic/wlj.png)
+![image-20260720175007631](../../pic/wlj.png)
 
-**王立杰，AI治理架构师，资深研发效能顾问**，工信部研发效能工程师认证专家讲师、PMI-ACP授权讲师、企业级规模化敏捷SAFe认证咨询师(SPC6)、华为云MVP（最有价值专家），曾任京东首席敏捷创新教练、IBM客户技术专家、DNV高级咨询师等，帮助小米IT信息部、OPPO内容产品中心、海康威视、京东方CTIO、吉利亿咖通、晓羊教育集团、中远海运租赁、京东购物APP、京东到家、招商银行、工商银行等组织实现研发效能提效。畅销书《敏捷无敌》、《京东敏捷实践指南》作者，江湖人称“**无敌哥**”。
+**王立杰，AI治理架构师，资深研发效能顾问**，工信部研发效能工程师认证专家讲师、PMI-ACP授权讲师、企业级规模化敏捷SAFe认证咨询师(SPC6)，曾任京东首席敏捷创新教练、IBM客户技术专家、DNV高级咨询师等，帮助小米IT信息部、OPPO内容产品中心、海康威视、京东方CTIO、吉利亿咖通、晓羊教育集团、中远海运租赁、京东购物APP、京东到家、招商银行、工商银行等组织实现研发效能提效。畅销书《敏捷无敌》、《京东敏捷实践指南》作者，江湖人称“**无敌哥**”。
 
 **教授经典课程：**
 
@@ -421,7 +421,7 @@ Agentic Agile 不是对管理学的修补，而是对软件研发工程的**重�
 - [Agentic Agile 90 天试点落地清单](http://www.iloveagile.me/)
 - [Agentic Agile 成熟度自测表](http://www.iloveagile.me/)
 
-<img src="../pic/book.png" alt="book" style="zoom:28%;" align=left />
+<img src="../../pic/book.png" alt="book" style="zoom:28%;" align=left />
 
 - [《Agentic Agile/智能体敏捷—— 从“碳基协作”到“硅基自治”的AI研发落地指南》](http://www.iloveagile.me/shop/)
 - 《Agentic Agile/智能体敏捷 —— AI时代研发治理沙盘实战课》（联系无敌哥）

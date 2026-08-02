@@ -148,10 +148,11 @@ agentic-agile-343-community-ed/
 
 ## 九、关于作者与社区
 
-**王立杰（无敌哥）**，AI 治理架构师、资深研发效能顾问。工信部研发效能工程师认证专家讲师、PMI-ACP 授权讲师、SAFe SPC6、华为云 MVP；畅销书《敏捷无敌》《京东敏捷实践指南》作者。
+**王立杰（无敌哥）**，AI 治理架构师、资深研发效能顾问；畅销书《敏捷无敌》《京东敏捷实践指南》作者。
 
 - 官网：<http://agentic.iloveagile.me/about>
 - 微信：`iloveagile` · Email：3433839@qq.com
-- 进阶课程：《Agentic Agile/智能体敏捷：AI 时代研发治理沙盘实战课》等（联系无敌哥）
+- 在线课程：《Agentic Agile 3-4-3 快速入门：完成第一个可验证治理闭环》详见 http://agentic.iloveagile.me/
+- 进阶线下课程：《Agentic Agile/智能体敏捷：AI 时代研发治理沙盘实战课》等（联系无敌哥）
 
 > 工具全开源，但"会用"与"用好"之间隔着体系化学习与企业场景陪跑——这正是课程与内训的价值所在。认同理念？欢迎在官网签署《Agentic Agile 宣言》，加入先锋社区。
