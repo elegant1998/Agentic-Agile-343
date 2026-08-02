@@ -155,4 +155,4 @@ agentic-agile-343-community-ed/
 - 在线课程：《Agentic Agile 3-4-3 快速入门：完成第一个可验证治理闭环》详见 http://agentic.iloveagile.me/
 - 进阶线下课程：《Agentic Agile/智能体敏捷：AI 时代研发治理沙盘实战课》等（联系无敌哥）
 
-> 工具全开源，但"会用"与"用好"之间隔着体系化学习与企业场景陪跑——这正是课程与内训的价值所在。认同理念？欢迎在官网签署《Agentic Agile 宣言》，加入先锋社区。
+> 认同理念？欢迎在官网签署《Agentic Agile 宣言》，加入先锋社区。
