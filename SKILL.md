@@ -1,6 +1,6 @@
 ---
 name: agentic-agile-343
-description: Agentic-Agile-343，让AI研发治理，进可攻退可守 By 无敌哥. Agentic AI governance: 3-4-3, intent contract, constraint matrix, evidence bundle, SCOPE-V, telemetry, Grill-Me, critical thinking.
+description: "Agentic-Agile-343，让AI研发治理，进可攻退可守 By 无敌哥. Agentic AI governance: 3-4-3, intent contract, constraint matrix, evidence bundle, SCOPE-V, telemetry, Grill-Me, critical thinking."
 display_name: "Agentic Agile 343"
 version: "1.24.0"
 author: "王立杰-无敌哥"
