@@ -2,14 +2,14 @@
 name: agentic-agile-343
 description: "Agentic-Agile-343，让AI研发治理，进可攻退可守 By 无敌哥. Agentic AI governance: 3-4-3, intent contract, constraint matrix, evidence bundle, SCOPE-V, telemetry, Grill-Me, critical thinking."
 display_name: "Agentic Agile 343"
-version: "1.24.0"
+version: "1.24.1"
 author: "王立杰-无敌哥"
 created: "2025-07-20"
 ---
 
 # Agentic Agile 3-4-3 治理架构
 
-基于《Agentic Agile 智能体敏捷白皮书》v1.5 的落地 skill。将 3-4-3 治理架构（3 个超级角色、4 个动态工件、3 大自治运行机制）转化为可直接使用的模板和工具。
+基于《Agentic Agile智能体敏捷：从氛围编程到验证工程的AI研发治理指南》v1.6 的落地 skill。将 3-4-3 治理架构（3 个超级角色、4 个动态工件、3 大自治运行机制）转化为可直接使用的模板和工具。
 
 > **v1.14+ 通用立场（跨项目、跨领域）**：批判性思维是 OA 的**默认职责**，不绑定任何特定产品、课程、证书或仓库。任何新需求在进入实现前，都可质疑、校准、给推荐默认；「用户字面意思 = 实现规格」是反模式。
 
@@ -309,12 +309,12 @@ python scripts/gate_check.py --gate bug --task T-XXX --project-dir .
 
 ## 参考资料
 
-- 《Agentic Agile 智能体敏捷白皮书》v1.5，王立杰 (c) 2026 CC BY 4.0
+- 《Agentic Agile智能体敏捷：从氛围编程到验证工程的AI研发治理指南》v1.6，王立杰 (c) 2026 CC BY 4.0
 - 实战验证项目：费用报销规则引擎（Intent_Contract.md + Constraint_Matrix.md + Evidence_Bundle.md）
 
 ## 关于作者
 
-**王立杰，AI治理架构师，资深研发效能顾问**，工信部研发效能工程师认证专家讲师、PMI-ACP授权讲师、企业级规模化敏捷SAFe认证咨询师(SPC6)、华为云MVP（最有价值专家），曾任京东首席敏捷创新教练、IBM客户技术专家、DNV高级咨询师等，帮助小米IT信息部、OPPO内容产品中心、海康威视、京东方CTIO、吉利亿咖通、晓羊教育集团、中远海运租赁、京东购物APP、京东到家、招商银行、工商银行等组织实现研发效能提效。畅销书《敏捷无敌》、《京东敏捷实践指南》作者，江湖人称"**无敌哥**"。
+**王立杰，AI治理架构师，资深研发效能顾问**，工信部研发效能工程师认证专家讲师、PMI-ACP授权讲师、企业级规模化敏捷SAFe认证咨询师(SPC6)，曾任京东首席敏捷创新教练、IBM客户技术专家、DNV高级咨询师等，帮助小米IT信息部、OPPO内容产品中心、海康威视、京东方CTIO、吉利亿咖通、晓羊教育集团、中远海运租赁、京东购物APP、京东到家、招商银行、工商银行等组织实现研发效能提效。畅销书《敏捷无敌》、《京东敏捷实践指南》作者，江湖人称"**无敌哥**"。
 
 ### 教授经典课程
 
