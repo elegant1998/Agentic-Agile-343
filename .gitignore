@@ -1,0 +1,7 @@
+# Local self-governance artifacts are evidence for this checkout, not skill distribution files.
+/governance/
+/tests/
+
+# Python runtime caches.
+__pycache__/
+*.py[cod]

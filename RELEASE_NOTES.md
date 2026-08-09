@@ -2,15 +2,27 @@
 
 > 🌐 English version: [RELEASE_NOTES.en.md](RELEASE_NOTES.en.md)
 
-# Agentic Agile 3-4-3 治理架构 · 开源版 v1.24.0
+# Agentic Agile 3-4-3 治理架构 · 开源版 v1.25.0
 
 > **先校准、再打怪。** 这是完整、可运行的 Agentic AI 研发治理框架——全部开源，无保留。让 AI 研发治理，进可攻退可守。
 
-- **版本**：`1.24.0`
-- **发布日期**：2026-08-02
+- **版本**：`1.25.0`
+- **发布日期**：2026-08-09
 - **许可证**：代码/模板 MIT · 白皮书 CC BY 4.0
 - **作者**：王立杰（无敌哥），AI 治理架构师
 - **官网**：<http://agentic.iloveagile.me/about> · 微信 `iloveagile`
+
+---
+
+## v1.25.0 变更
+
+- 新增既有项目轻量 Recon：Baseline / Preserve / Unknown / Change Envelope。
+- 新增风险评估与五种治理模式推荐，信息不足时禁止自动降级。
+- 新增 `recon`、`assess-risk` 两个统一 CLI 子命令。
+- 新增 3 个模板，当前共 27 个脚本、16 个模板、10 篇参考。
+- Python TDD 机械门可自动识别 pytest 或标准库 unittest 的 RED/GREEN。
+- Skill 绑定《Agentic Agile智能体敏捷：从氛围编程到验证工程的AI研发治理指南》v1.6。
+- 本版本不创建 Tag、不执行发布。
 
 ---
 

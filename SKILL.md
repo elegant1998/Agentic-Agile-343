@@ -2,7 +2,7 @@
 name: agentic-agile-343
 description: "Agentic-Agile-343，让AI研发治理，进可攻退可守 By 无敌哥. Agentic AI governance: 3-4-3, intent contract, constraint matrix, evidence bundle, SCOPE-V, telemetry, Grill-Me, critical thinking."
 display_name: "Agentic Agile 343"
-version: "1.24.1"
+version: "1.25.0"
 author: "王立杰-无敌哥"
 created: "2025-07-20"
 ---
@@ -23,6 +23,8 @@ created: "2025-07-20"
 - "SCOPE-V"、"意图图谱"
 - "智能体敏捷"、"AI 研发治理"
 - "算力遥测"、"价值遥测"、"telemetry dashboard"
+- "既有项目"、"遗留系统"、"Recon"、"Change Envelope"
+- "风险评估"、"治理模式"、"governance profile"
 
 ## 核心资源
 
@@ -48,6 +50,8 @@ created: "2025-07-20"
 | **Token 实测** | `scripts/fetch_token_usage.sh` | **调用 @geeeger/ocusage 实测 AI 客户端真实 Token 用量，替代人工估算（v1.21）；缺失时自动 `npm i -g` 安装（v1.22）** |
 | **依赖自举** | `scripts/ensure_py_env.sh` + `scripts/_bootstrap.py` | **自包含依赖 bootstrap：首次运行自动建 venv + 装 pyyaml，缺 ocusage 自动全局安装（v1.22）** |
 | 代码上下文发现 | `scripts/discover_context.py` | AST 解析自动发现 API 端点、模型、依赖 |
+| **轻量 Recon** | `scripts/recon.py` | **既有项目只读侦察，输出 Baseline / Preserve / Unknown / Change Envelope** |
+| **风险评估** | `scripts/assess_risk.py` | **按事实推荐 explore / delivery / high-risk / legacy / multi-module 治理模式** |
 | 上下文裁剪引擎 | `scripts/crop_context.py` | 三层注入模型，从图谱裁剪出给 AS 的精简 prompt |
 | **Harness 引擎** | `scripts/harness.py` | **约束执行引擎（含 7 个 NFR 验证器，支持插件扩展）** |
 | 自洽性检查 | `scripts/self_consistency_check.py` | LOOP-1: 校验产出物是否与契约一致 |
@@ -63,10 +67,22 @@ created: "2025-07-20"
 | **证据聚合器** | `scripts/aggregate_evidence.py` | **多模块证据包聚合 + 遥测合并 → 发布证据包** |
 | **共享解析库** | `scripts/gov_common.py` | **契约/证据包/图谱统一发现与解析（MD+YAML 双格式），被各验证脚本复用** |
 | **Loop Memory 模板** | `templates/Template_Loop_Memory.yaml` | **跨 cycle 统一状态文件（进度 + 教训 + 模式 + 决策）** |
+| **Recon 基线模板** | `templates/Template_Recon_Baseline.md` | **既有项目的事实、保留项、未知项与变更围栏** |
+| **Change Envelope** | `templates/Template_Change_Envelope.yaml` | **限定本轮允许和禁止修改的范围** |
+| **治理模式模板** | `templates/Template_Governance_Profile.yaml` | **风险等级、最小工件、机械门和 HITL 要求** |
 | 遥测仪表板 | `assets/dashboard.html` | 网页式实时大屏 |
 | **参考文档** | `references/*.md` | **按需加载的详细参考（10 个文件，见下文各节链接）** |
 
 ## 使用流程
+
+> **既有项目（v1.25.0）**：不要先机械复制全部治理模板。先运行只读 Recon，再根据风险评估建立最小治理底座：
+>
+> ```bash
+> python scripts/cli.py recon --project-dir .
+> python scripts/cli.py assess-risk --project-dir .
+> ```
+>
+> Recon 产出 Baseline / Preserve / Unknown / Change Envelope；Intent Graph 和首份契约应由这些事实生成。信息不足时保留 Unknown，禁止自动降级为低风险模式。
 
 > **单人项目**: 直接按 §1-10 操作，`protocol.yaml` 和模块治理完全不需要——
 > 就像它们不存在一样。3-4-3 的默认行为不依赖它们。
@@ -253,6 +269,8 @@ L1 意图图谱（OA 会话级）→ L2 全局约束（共享）→ L2+ AI 编�
 - **🔴 显式签署·禁代签（v1.23）**：Grill-Me 决策确认**不等于**契约签署（sign-off）。OA 不得自行在契约中写入 `SIGNED`、IO 署名或"自动签署"标记；签署区 `IO（意图主理人）` 一行必须由 IO 本人填写并明确确认（回复「签署」或署名）。签署前不得创建业务代码（与 v1.18 契约前置一致）。`gate_check.py --gate pre` 会扫描"自动签署 / 代签 / OA 代"等标记并直接判失败，签署区缺失或 IO 未署名同样失败。
 - **🔴 签署检测否定语境修复（v1.23.1）**：`gate_check.py` 的代签扫描不得裸匹配子串。当"OA 代 / 代 OA / 自动签署"等标记出现在**否定语境**（同一行含 非/禁止/不得/无/不/未/并非/not/no）时——如"**非 OA 代签**""**禁止 OA 代签**"——属反代签的正向说明，必须**放行**而非误报失败。避免 IA 为规避误报而被迫改写合法签署措辞。
 - **🔴 C-QUAL-01 模板修正（v1.23.1）**：`Template_Constraints.yaml` 中 Node/vitest 项目的 check 不再写 `--coverage-reporter=json-summary`（vitest v2 不识别连字符写法）。正确写法为 `npx vitest run --coverage`，覆盖率阈值与 json-summary 在 `vitest.config` 的 `test.coverage` 配置；点号写法 `--coverage.reporter=json-summary` 亦可。否则命令报错会导致 C-QUAL-01 门禁**误判失败**。
+- **🔴 既有项目 Recon（v1.25.0）**：既有项目应先只读 Recon，再生成 Intent Graph、约束和契约。Recon 必须区分 Baseline / Preserve / Unknown / Change Envelope，不得把推测伪装成事实或覆盖未跟踪用户文件。
+- **🔴 风险驱动裁剪（v1.25.0）**：治理可依据证据自动升级；信息不足不得推荐低风险模式，高风险治理不得由 Agent 自动降级。Python TDD 门支持自动识别 pytest 或标准库 unittest 的真实 RED/GREEN。
 
 ## 🔴 强制检查门（v1.18 新增，v1.20 重构）
 

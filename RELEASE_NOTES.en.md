@@ -2,15 +2,25 @@
 
 > 🌐 中文版: [RELEASE_NOTES.md](RELEASE_NOTES.md)
 
-# Agentic Agile 3-4-3 Governance Framework · Open Source Edition v1.24.0
+# Agentic Agile 3-4-3 Governance Framework · Open Source Edition v1.25.0
 
 > **Calibrate first, then fight the bosses.** A complete, runnable governance framework for Agentic AI development — fully open source, no reservations. Let AI R&D governance be both offensive and defensive.
 
-- **Version**: `1.24.0`
-- **Release date**: 2026-08-02
+- **Version**: `1.25.0`
+- **Release date**: 2026-08-09
 - **License**: Code/templates MIT · Whitepaper CC BY 4.0
 - **Author**: Wang Lijie (无敌哥), AI Governance Architect
 - **Official site**: <http://agentic.iloveagile.me/about> · WeChat `iloveagile`
+
+---
+
+## v1.25.0 Changes
+
+- Added read-only lightweight Recon for existing projects.
+- Added explainable risk assessment and five governance profiles.
+- Added `recon` and `assess-risk` CLI commands plus three templates.
+- Python TDD gates now detect pytest or standard-library unittest RED/GREEN states.
+- No tag or external release is created by this update.
 
 ---
 

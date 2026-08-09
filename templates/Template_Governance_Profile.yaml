@@ -1,0 +1,8 @@
+version: "1.0"
+profile: delivery  # explore | delivery | high-risk | legacy | multi-module
+risk_level: medium # low | medium | high | safety-critical
+reasons: []
+minimum_artifacts: []
+required_gates: []
+hitl_requirements: []
+downgrade_rule: "高风险治理不得由 Agent 自动降级，必须由 IO 批准"

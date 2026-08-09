@@ -58,6 +58,10 @@ COMMANDS = {
 
     # ── 工具审计 ──
     "audit-tools":("audit_tools.py", "工具调用合规性审计"),
+
+    # ── 既有项目 Recon 与风险裁剪 ──
+    "recon":      ("recon.py", "既有项目轻量 Recon（默认只读）"),
+    "assess-risk":("assess_risk.py", "风险评估与治理模式推荐"),
 }
 
 # 需要将子命令作为第一个参数传递给目标脚本的命令

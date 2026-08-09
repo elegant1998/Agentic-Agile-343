@@ -41,6 +41,51 @@ def check(label, condition, detail=""):
     return condition
 
 
+def run_python_tests(project_dir, timeout=120):
+    """运行可用的 Python 测试框架并返回结构化结果。
+
+    优先使用项目环境中已安装的 pytest；否则使用标准库 unittest。
+    返回: {framework, returncode, total, passed, failed, output}
+    """
+    probe_rc, _, _ = run(
+        "python3 -c 'import pytest'", cwd=str(project_dir), timeout=10
+    )
+    if probe_rc == 0:
+        framework = "pytest"
+        rc, out, err = run("python3 -m pytest -q", cwd=str(project_dir), timeout=timeout)
+        output = "\n".join(part for part in (out, err) if part)
+        passed = sum(int(value) for value in re.findall(r"(\d+) passed", output))
+        failed = sum(
+            int(value)
+            for value in re.findall(r"(\d+) (?:failed|error(?:s)?)", output)
+        )
+        total = passed + failed
+    else:
+        framework = "unittest"
+        unittest_cmd = "python3 -m unittest discover -s tests -v"
+        if (Path(project_dir) / "tests" / "__init__.py").exists():
+            unittest_cmd = "python3 -m unittest discover -s tests -t . -v"
+        rc, out, err = run(
+            unittest_cmd,
+            cwd=str(project_dir),
+            timeout=timeout,
+        )
+        output = "\n".join(part for part in (out, err) if part)
+        match = re.search(r"Ran (\d+) tests?", output)
+        total = int(match.group(1)) if match else 0
+        failed = total if rc != 0 else 0
+        passed = total if rc == 0 else 0
+
+    return {
+        "framework": framework,
+        "returncode": rc,
+        "total": total,
+        "passed": passed,
+        "failed": failed,
+        "output": output,
+    }
+
+
 def check_signed(content):
     """检查契约是否经 IO 真实签署，而非 OA 代签/自动签署。
 
@@ -186,10 +231,20 @@ def gate_coding(task_id, project_dir):
                 all_pass &= check("测试运行确认 RED", False, "无法解析 vitest 输出")
         else:
             # Python 项目
-            rc, out, err = run("python3 -m pytest --tb=no -q 2>/dev/null || true",
-                               cwd=str(project_dir), timeout=60)
-            all_pass &= check("测试运行", "error" in out.lower() or "failed" in out.lower() or "no tests" in out.lower(),
-                              "需要人工确认测试处于 RED 状态")
+            result = run_python_tests(project_dir, timeout=60)
+            if result["total"] == 0:
+                all_pass &= check("测试运行确认 RED", False, "测试文件存在但无测试用例")
+            elif result["returncode"] != 0:
+                all_pass &= check(
+                    f"测试运行确认 RED（{result['failed']}/{result['total']} 失败，{result['framework']}）",
+                    True,
+                )
+            else:
+                print(
+                    f"  ⚠️ 测试已全绿（{result['passed']}/{result['total']}，{result['framework']}）"
+                    "— 可能已跳过 Red 阶段直接到 Green"
+                )
+                all_pass &= check("测试运行确认 RED", False, "测试已全绿，Red 阶段可能已跳过")
 
     return all_pass
 
@@ -217,7 +272,14 @@ def gate_prove(task_id, project_dir):
         except json.JSONDecodeError:
             all_pass &= check("测试运行", False, "无法解析 vitest 输出")
     else:
-        all_pass &= check("测试运行", False, "未找到 package.json 或 pytest")
+        result = run_python_tests(project_dir, timeout=120)
+        test_total = result["total"]
+        test_passed = result["passed"]
+        all_pass &= check(
+            f"测试全部通过（{test_passed}/{test_total}，{result['framework']}）",
+            result["returncode"] == 0 and test_passed > 0,
+            "Python 测试存在失败或未发现测试",
+        )
 
     # 2. test-total > 0
     all_pass &= check(f"test-total > 0（当前 {test_total}）", test_total > 0,

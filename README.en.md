@@ -1,4 +1,4 @@
-# Agentic Agile 3-4-3 Governance Framework · Open Source Edition v1.24.0
+# Agentic Agile 3-4-3 Governance Framework · Open Source Edition v1.25.0
 
 > 🌐 中文版: [README.md](README.md)
 

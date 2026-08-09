@@ -1,4 +1,4 @@
-# Agentic Agile 3-4-3 治理架构 · 开源版 v1.24.0
+# Agentic Agile 3-4-3 治理架构 · 开源版 v1.25.0
 
 > **让AI交付可治理、可追溯、可验证。** 这是一套 Agentic AI 研发的**完整、可运行治理框架**——从意图契约到证据闭环、从约束门禁到遥测仪表板，全部开源，开箱即用。让 AI 研发治理，进可攻退可守。
 
@@ -34,7 +34,7 @@
 
 | 能力 | 关键资产 |
 |---|---|
-| 意图契约 / 约束矩阵 / 证据包 / 意图图谱 | `templates/` 13 个模板（MD + YAML 双格式） |
+| 意图契约 / 约束矩阵 / 证据包 / 意图图谱 / Recon / 风险模式 | `templates/` 16 个模板（MD + YAML 双格式） |
 | 机械门禁（5 道门，退出码硬拦截） | `scripts/gate_check.py` |
 | 约束执行引擎（G0–G8 + 7 个 NFR 验证器） | `scripts/harness.py` |
 | 契约 AC 逐条验证 | `scripts/verify_contract.py` |
@@ -45,7 +45,16 @@
 | 工具审计 | `scripts/audit_tools.py` |
 | 遥测采集（4 层 9 维） + Token 实测 | `scripts/collect_telemetry.py`、`fetch_token_usage.sh` |
 | 一键遥测 + 仪表板 | `scripts/quick_telemetry.sh`、`assets/dashboard.html` |
-| 批判性思维 / Grill-Me / LOOP / Graph 工程 | `references/` 9 篇参考 |
+| 批判性思维 / Grill-Me / LOOP / Graph 工程 | `references/` 10 篇参考 |
+
+### 既有项目先 Recon（v1.25.0）
+
+```bash
+python scripts/cli.py recon --project-dir .
+python scripts/cli.py assess-risk --project-dir .
+```
+
+Recon 默认只读，先输出 Baseline、Preserve、Unknown 与 Change Envelope，再生成最小治理工件。风险信息不足时不会自动降级为探索模式。
 | 证书申请（AASC） | `scripts/certificate.py` |
 
 ## 四、快速开始
@@ -132,7 +141,7 @@ agentic-agile-343-community-ed/
 ├── .gitignore
 ├── scripts/                      # 25 个可运行脚本（门禁/引擎/验证/遥测/上下文/图谱）
 ├── templates/                    # 13 个工件模板（MD + YAML 双格式）
-├── references/                   # 9 篇参考文档（批判性思维/SCOPE-V/Harness/LOOP/Graph/遥测…）
+├── references/                   # 10 篇参考文档（批判性思维/SCOPE-V/Harness/LOOP/Graph/遥测…）
 ├── assets/
 │   └── dashboard.html            # 遥测仪表板（纯静态，双击即看）
 ├── examples/
