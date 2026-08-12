@@ -1,4 +1,4 @@
-# Agentic Agile 3-4-3 Governance Framework · Open Source Edition v1.25.0
+# Agentic Agile 3-4-3 Governance Framework · Open Source Edition v1.39.1
 
 > 🌐 中文版: [README.md](README.md)
 
@@ -26,7 +26,8 @@ Moving from casual **Vibe Coding** to rigorous **Verified Engineering** requires
 - **3 super-roles**: Intent Owner (IO, sets direction), Orchestration Architect (OA, manages machines & boundaries), Autonomous Swarm (AS, deterministic executors).
 - **4 dynamic artifacts**: Intent Graph, Intent Contract, Constraint Matrix, Compute & Value Telemetry.
 - **3 autonomous mechanisms**: intent injection (dialogue → contract gate), high-frequency adversarial self-purification loop, human exception arbitration (HITL + evidence-bundle acceptance).
-- **SCOPE-V engineering control loop**: `Specify → Constrain → Orchestrate → Prove → Evolve → Verify → Telemetry`.
+- **Six continuous control planes in SCOPE-V**: `S / C / O / Prove ⇄ Evolve / V`; the fast proof-evolution loop is complemented by the slow `Verify → Telemetry → Specify/Constrain/Orchestrate` feedback loop.
+- **Cross-cutting autonomy**: context, execution, and evolution mechanisms operate across the control planes instead of mapping one-to-one to stages.
 
 For the full theoretical foundation (cognitive science / cybernetics / systems theory), the Agentic Agile Manifesto, the maturity model (L1–L4), and the adoption roadmap, see [`docs/whitepaper/`](docs/whitepaper/).
 
@@ -36,29 +37,101 @@ This repository **is** the complete edition — no more Community/Full split:
 
 | Capability | Key Asset |
 |---|---|
-| Intent Contract / Constraint Matrix / Evidence Bundle / Intent Graph | `templates/` — 13 templates (MD + YAML dual format) |
+| Intent Contract / Constraint Matrix / Evidence Bundle / Intent Graph / Recon / risk profiles | `templates/` — 18 templates (MD + YAML dual format) |
 | Mechanical gates (5 gates, hard-blocking exit codes) | `scripts/gate_check.py` |
 | Constraint execution engine (G0–G8 + 7 NFR validators) | `scripts/harness.py` |
 | Contract AC clause-by-clause verification | `scripts/verify_contract.py` |
+| Risk-driven multi-layer verification / evidence independence / invalid-green detection | `scripts/verification_plan.py`, `Template_Verification_Plan.yaml` |
+| Single-project proof-carrying release / artifact-evidence binding / release facts | `scripts/release_manifest.py`, `Template_Release_Manifest.yaml` |
 | Evidence bundle audit | `scripts/audit_evidence.py` |
 | Triangulation / rollback safety / freshness / cross-module | `scripts/verify_*.py` |
 | Context engineering 3-layer injection | `scripts/crop_context.py` |
 | Work-graph DAG engine | `scripts/graph_engine.py` |
 | Tool audit | `scripts/audit_tools.py` |
-| Telemetry collection (4 layers, 9 dimensions) + token measurement | `scripts/collect_telemetry.py`, `fetch_token_usage.sh` |
-| One-click telemetry + dashboard | `scripts/quick_telemetry.sh`, `assets/dashboard.html` |
-| Critical Thinking / Grill-Me / LOOP / Graph engineering | `references/` — 9 references |
+| Telemetry collection (4 layers, 9 dimensions) + token measurement | `scripts/collect_telemetry.py`, `scripts/token_usage.py`, `fetch_token_usage.sh` |
+| Cross-platform telemetry + dashboard | `scripts/telemetry_workflow.py`, `scripts/telemetry_tracker.py`, `assets/dashboard.html` |
+| Automatic evidence-to-telemetry finalization + dual dashboards | `scripts/evidence_workflow.py` |
+| Critical Thinking / Grill-Me / LOOP / Graph / maintenance / Recon / verification / release | `references/` — 15 references |
 | Certificate application (AASC) | `scripts/certificate.py` |
+
+### Natural-language routing (v1.36.2)
+
+Users do not need CLI knowledge. Requests such as “do not rely only on unit tests,” “design multi-layer verification,” “check whether evidence has the same source,” or “detect invalid green” route to Verification Plan alongside the existing workflows. See [`references/natural_language_routing.md`](references/natural_language_routing.md).
+
+“Prepare a release,” “generate a release manifest,” “check artifact/evidence consistency,” and “record released/rolled back” route to the single-project Release Manifest. Natural language never grants release approval.
+
+### Single-project proof-carrying release (v1.32.0)
+
+```bash
+python scripts/cli.py release plan --task T-001 --version 1.2.3 --artifact dist/app.tar.gz --project-dir .
+python scripts/cli.py release check --manifest governance/releases/Release_Manifest_1.2.3.yaml --project-dir .
+```
+
+Planning is dry-run by default and measures Git commit/worktree state, artifact SHA-256/size, configuration, and task evidence. Apply creates only a DRAFT. A valid authorized manifest yields `READY_FOR_HUMAN_RELEASE`, never a tag, push, build, or deployment. `record` only appends already-executed released/rolled_back facts. See [`references/release_manifest.md`](references/release_manifest.md).
+
+### Risk-driven multi-layer verification (v1.31.0)
+
+```bash
+python scripts/cli.py verification plan --task T-001 --project-dir .
+python scripts/cli.py verification plan --task T-001 --project-dir . --risk high --trace AC-001 --apply
+python scripts/cli.py verification check --task T-001 --project-dir .
+```
+
+Planning is dry-run by default; apply only creates a DRAFT and never overwrites. Once explicitly authorized, the plan joins the prove gate. Missing layers, copied same-source evidence, insufficient independence, stale or mismatched evidence, LLM-only key proof, and AI-signed human acceptance cannot become PASS. See [`references/verification_planning.md`](references/verification_planning.md).
+
+### Risk-driven initialization (v1.26.0)
+
+```bash
+python scripts/cli.py init --project-dir .          # dry-run by default
+python scripts/cli.py init --project-dir . --apply  # write only after IO review
+```
+
+The entry point classifies the project, evaluates seven risk domains, and selects one of five governance profiles. Existing projects include read-only Recon; Unknown never lowers risk, existing files are never overwritten, and generated contracts remain PENDING.
+
+### Gate self-governance (v1.26.1)
+
+```bash
+python scripts/cli.py maintain open --id M-001 --task T-128 --project-dir .
+python scripts/cli.py maintain check --id M-001 --project-dir .
+python scripts/cli.py maintain close --id M-001 --project-dir .
+```
+
+Deterministic low-risk gate defects use `M-XXX` maintenance records instead of repeated business-contract addenda. Unknown, weaker gates, changed signing semantics, or expanded permissions fail closed and require an IO-signed Amendment. See [`references/maintenance_channel.md`](references/maintenance_channel.md).
+
+### Task-scoped Recon (v1.27.0)
+
+```bash
+python scripts/cli.py recon task --task T-001 --target src/example.py --project-dir .
+```
+
+Read-only discovery around concrete change targets, separating facts from reference/test/public-entry candidates and unknown runtime relationships. Lightweight adapters cover Python, JavaScript/TypeScript, C/C++, Java/JSP, with basic Go, Rust, and Shell support. The suggested Change Envelope remains `DRAFT_NOT_AUTHORIZED`.
+
+### Dual-map enhanced Recon (v1.37.0)
+
+IWE is the recommended Document Map for requirements, rules, ACs, ADRs, and historical decisions. codebase-memory-mcp is the recommended Code Map for modules, symbols, calls, routes, and tests. 343 owns stable-ID Trace Links. Both are optional: built-in Recon remains L0, Code Map alone is L1, Document Map alone is L2, and both maps form L3. Agent-native MCP and explicit project-local JSON/YAML artifacts are supported; unavailable, stale, conflicting, or incompatible providers record Unknown and safely fall back. 343 never auto-installs, configures, contacts, or writes back to these tools, and map results cannot authorize a Change Envelope.
+
+After IO authorizes a formal envelope, run `python scripts/cli.py envelope check --task T-001 --project-dir .`. It checks all Git changes and automatically joins the prove gate when the formal envelope exists; outside or unknown changes fail closed.
+
+For code without reliable tests, use `cli.py characterize plan/capture/verify` to preserve IO-confirmed observable behavior. A captured baseline is automatically re-verified by the prove gate.
+
+Use `cli.py change plan/status/prepare/verify/close` to orchestrate the complete safe-change flow; state is always recomputed from current evidence.
+
+Users can simply say “This is a bug: … please fix it.” They do not need B/T identifiers or CLI commands. The agent discovers the evidence-backed parent task, allocates the next B-ID, and asks only one high-information question when the association is ambiguous. Calling something a bug never bypasses classification.
+
+Internally, use `cli.py bug open/classify/reproduce/status/verify/telemetry/close`. Completion is proven by immutable closing evidence instead of mutating the signed parent contract. After verification, record a separate correction run with `bug telemetry --test-total N --test-passed N`; the original task telemetry remains unchanged.
 
 ## 4. Quick Start
 
 ### 1. Prepare the Python environment
 
 ```bash
-# On first run, a venv is created automatically and pyyaml is installed
-# (falls back to MD-only mode if pyyaml is missing)
-bash scripts/ensure_py_env.sh
+# Bash is not required; the public entry point starts with the current Python.
+python scripts/cli.py list
 ```
+
+When PyYAML is missing, YAML-consuming scripts use the Python-native
+`_bootstrap.py` path to create or reuse `~/.agentic-agile-343/venv` and install
+the dependency. Windows, macOS, and Linux share the same implementation.
 
 ### 2. Initialize project governance (solo)
 
@@ -69,14 +142,15 @@ cp templates/Template_Constraint_Matrix.md   governance/Constraint_Matrix.md
 cp templates/Template_Constraints.yaml        governance/constraints.yaml
 ```
 
-### 3. Run the SCOPE-V loop
+### 3. Run the six SCOPE-V control planes
 
 ```
 Specify  → fill the Intent Contract → Grill-Me decision confirmation → IO signs explicitly (OA must not sign on IO's behalf)
 Constrain → fill the Constraint Matrix (6 domains; list MUST first)
 Orchestrate → TDD red→green→refactor; write the failing test first per task
-Prove    → run tests until all green + AC clause-by-clause verification
-Evolve / Verify / Telemetry → evidence bundle + telemetry + graph writeback
+Prove ⇄ Evolve → repair insufficient proof and prove again
+Verify  → reach a verdict from qualified evidence
+Verify → Telemetry → Specify/Constrain/Orchestrate → feed facts into later intent, constraints, or orchestration
 ```
 
 ### 4. Mechanical gates (5 gates, hard blocking)
@@ -103,8 +177,11 @@ python scripts/verify_contract.py --task T-001 --project-dir .
 # Constraint check
 python scripts/harness.py check --all
 
-# One-click telemetry
-bash scripts/quick_telemetry.sh T-001 ./governance
+# Recommended completion entry: after Prove passes, Evidence/Telemetry/Dashboard closure runs automatically
+python scripts/cli.py change verify --task T-001 --project-dir .
+
+# Low-level diagnostic / rerun entry
+python scripts/cli.py evidence finalize --task T-001 --project-dir .
 ```
 
 ### 5. A filled-in example
@@ -133,7 +210,7 @@ agentic-agile-343-community-ed/
 ├── LICENSE                       # MIT (code); whitepaper CC BY 4.0, see docs/whitepaper
 ├── requirements.txt              # Python deps (pyyaml, optional)
 ├── .gitignore
-├── scripts/                      # 25 runnable scripts (gates / engine / verification / telemetry / context / graph)
+├── scripts/                      # 26 runnable scripts (gates / engine / verification / evidence finalization / telemetry / context / graph)
 ├── templates/                    # 13 artifact templates (MD + YAML dual format)
 ├── references/                   # 9 reference docs (critical thinking / SCOPE-V / Harness / LOOP / Graph / telemetry…)
 ├── assets/
@@ -158,3 +235,4 @@ agentic-agile-343-community-ed/
 - Advanced courses: *Agentic Agile / 智能体敏捷: AI-Era R&D Governance Sandbox Bootcamp* and others (contact 无敌哥)
 
 >  Resonate with the philosophy? Sign the *Agentic Agile Manifesto* on the official site and join the pioneer community.
+Starting with v1.38.0, project Recon first consumes canonical project-local map artifacts. When a visible CLI is available but its map is missing, Recon initializes IWE within the explicit project boundary and invokes codebase-memory-mcp with `index_repository --repo-path <PROJECT> --persistence true`. Normalized dual maps produce Trace Links automatically; unsupported links remain Candidate/Unknown. `--no-auto-context` disables initialization, and failures fall back to L0.

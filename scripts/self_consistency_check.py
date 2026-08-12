@@ -47,13 +47,9 @@ def check_endpoint_count(project_dir: Path, expected_count: int, router_path: st
     if not fp.exists():
         return False, 0
     try:
-        result = subprocess.run(
-            ["grep", "-c", "@router", str(fp)],
-            capture_output=True, text=True
-        )
-        actual = int(result.stdout.strip() or 0)
+        actual = fp.read_text(encoding="utf-8", errors="replace").count("@router")
         return actual >= expected_count, actual
-    except Exception:
+    except OSError:
         return False, 0
 
 
@@ -64,7 +60,7 @@ def check_tests_runnable(project_dir: Path, test_file: str) -> tuple[bool, str]:
         return False, "文件不存在"
     try:
         result = subprocess.run(
-            ["python3", "-m", "pytest", str(fp), "--collect-only", "-q"],
+            [sys.executable, "-m", "pytest", str(fp), "--collect-only", "-q"],
             capture_output=True, text=True,
             timeout=60,
             cwd=str(project_dir)

@@ -41,6 +41,7 @@ try:
     from dashboard import write_static_dashboard
     from dashboard import summarize_for_index as _summarize_for_index
     from certificate import calc_certificate_eligibility as _calc_certificate_eligibility
+    from telemetry_tracker import derive_measurements as _derive_measurements
 except ImportError:
     pass  # 模块不可用时降级为内联定义（见下方）
 
@@ -48,12 +49,68 @@ except ImportError:
 
 # ─── 分层遥测模型 ──────────────────────────────────────────
 
+def _get_project_uid(project_root: str = ".") -> str:
+    """生成或读取项目唯一标识（project_uid）。
+    优先从 git remote URL 派生（SHA256 前 16 位，同仓库永远一致，跨公司不撞）；
+    无 git 则生成 UUID 持久化到 .project_uid 文件。
+    """
+    import hashlib, uuid as _uuid
+    # 1. 尝试 git remote
+    try:
+        r = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            capture_output=True, text=True, timeout=5, cwd=project_root,
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            return hashlib.sha256(r.stdout.strip().encode()).hexdigest()[:16]
+    except Exception:
+        pass
+    # 2. 读取已持久化的 UID
+    uid_file = os.path.join(project_root, ".project_uid")
+    if os.path.isfile(uid_file):
+        try:
+            uid = open(uid_file, "r").read().strip()
+            if uid:
+                return uid
+        except Exception:
+            pass
+    # 3. 生成新 UUID 并持久化
+    uid = _uuid.uuid4().hex[:16]
+    try:
+        with open(uid_file, "w") as f:
+            f.write(uid)
+    except Exception:
+        pass
+    return uid
+
+
 def collect(args):
     """采集全部 4 层遥测指标"""
     now = datetime.now(timezone.utc).isoformat()
     task_id = _normalize_task_id(getattr(args, "task", None) or getattr(args, "module_id", None))
     # contract = 单次意图契约；project = 项目累积（默认：有 --task 则为 contract）
     scope = getattr(args, "scope", None) or ("contract" if task_id else "project")
+
+    # P0 Measurement Contract: task collection derives facts from project artifacts/events.
+    # Explicit numeric compatibility inputs are accepted only as DECLARED data.
+    if task_id:
+        out = Path(getattr(args, "output", "governance/telemetry.json")).resolve()
+        project_root = out.parent.parent if out.parent.name == "governance" else Path.cwd().resolve()
+        measurements = _derive_measurements(project_root, task_id)
+        manual = ("tasks_assigned", "tasks_completed", "tasks_first_pass",
+                  "auto_healed", "constraint_failures_total")
+        supplied = [name for name in manual if getattr(args, name, None) is not None]
+        if supplied:
+            if getattr(args, "p0_source", None) != "declared":
+                raise ValueError("手工 P0 数字必须同时使用 --p0-source declared")
+            now_declared = datetime.now(timezone.utc).isoformat()
+            for name in supplied:
+                measurements[name] = {"value": getattr(args, name), "status": "DECLARED",
+                                      "source": "cli_declared", "evidence": [],
+                                      "measured_at": now_declared}
+        args._p0_measurements = measurements
+        for name, metric in measurements.items():
+            setattr(args, name, metric.get("value"))
 
     # 约束矩阵 → 门禁/测试：消费 harness 执行结果（不再手工判定，从源头解决）
     _wire_matrix(args, task_id)
@@ -86,6 +143,7 @@ def collect(args):
         "meta": {
             "collected_at": now,
             "project": args.project or "UNKNOWN",
+            "project_uid": _get_project_uid(),
             "version": "2.2",
             "model": "4-layer-9-dim",
             "scope": scope,  # contract | project
@@ -195,6 +253,9 @@ def _accumulate_runs_raw(project_dir: Path, run_summaries: list, latest_contract
         "new_patterns": 0,
     }
     token_sources = set()
+    coverage = {name: {"measured": 0, "eligible": 0} for name in (
+        "tasks_assigned", "tasks_completed", "tasks_first_pass",
+        "constraint_failures_total", "auto_healed")}
     total_patterns = 0
     for r in run_summaries:
         d = _read_run_file(project_dir, r.get("file"))
@@ -209,11 +270,22 @@ def _accumulate_runs_raw(project_dir: Path, run_summaries: list, latest_contract
         mp = c.get("must_pass_rate", {})
         he = c.get("hitl_escalation_rate", {})
         kc = ev.get("knowledge_crystallization", {})
-        raw["tasks_assigned"] += int(ga.get("tasks_assigned", 0) or 0)
-        raw["tasks_completed"] += int(ga.get("tasks_completed", 0) or 0)
-        raw["tasks_first_pass"] += int(fp.get("tasks_first_pass", 0) or 0)
-        raw["auto_healed"] += int(ah.get("auto_healed", 0) or 0)
-        raw["constraint_failures_total"] += int(ah.get("failures_total", 0) or 0)
+        entries = {
+            "tasks_assigned": (ga, "tasks_assigned"),
+            "tasks_completed": (ga, "tasks_completed"),
+            "tasks_first_pass": (fp, "tasks_first_pass"),
+            "auto_healed": (ah, "auto_healed"),
+            "constraint_failures_total": (ah, "failures_total"),
+        }
+        for name, (metric, field) in entries.items():
+            coverage[name]["eligible"] += 1
+            status = metric.get("status")
+            # v1.33 and earlier run files had no Measurement Contract status.
+            # Treat absent status as trusted legacy data during --rebuild, while
+            # keeping explicit UNKNOWN / NOT_APPLICABLE out of aggregation.
+            if (status is None or status in ("MEASURED", "DERIVED", "DECLARED")) and metric.get(field) is not None:
+                raw[name] += int(metric[field])
+                coverage[name]["measured"] += 1
         raw["must_passed"] += int(mp.get("must_passed", 0) or 0)
         raw["must_total"] += int(mp.get("must_total", 0) or 0)
         raw["hitl_count"] += int(he.get("hitl_count", 0) or 0)
@@ -235,6 +307,7 @@ def _accumulate_runs_raw(project_dir: Path, run_summaries: list, latest_contract
     if latest_tp > total_patterns:
         total_patterns = latest_tp
     raw["total_patterns"] = total_patterns
+    raw["measurement_coverage"] = coverage
     measured = {s for s in token_sources if s.startswith("measured")}
     if measured and len(measured) == len(token_sources):
         raw["token_source"] = "measured:ocusage"
@@ -267,6 +340,23 @@ class _RawArgs:
         self.ai_monthly_cost = 0.0
         self.context_input_tokens = 0
         self.context_output_tokens = 0
+        now = datetime.now(timezone.utc).isoformat()
+        coverage = raw.get("measurement_coverage", {})
+        self._p0_measurements = {}
+        for name in ("tasks_assigned", "tasks_completed", "tasks_first_pass",
+                     "constraint_failures_total", "auto_healed"):
+            c = coverage.get(name, {})
+            measured = c.get("measured", 0)
+            status = "DERIVED" if measured else "UNKNOWN"
+            if name in ("constraint_failures_total", "auto_healed") and not measured and c.get("eligible", 0):
+                status = "NOT_APPLICABLE"
+            self._p0_measurements[name] = {
+                "value": raw[name] if measured else None, "status": status,
+                "source": "project_run_aggregation" if measured else "insufficient_run_sources",
+                "evidence": [], "measured_at": now if measured else None,
+            }
+            if not measured:
+                setattr(self, name, None)
 
 
 def _aggregate_project_from_runs(
@@ -304,6 +394,7 @@ def _aggregate_project_from_runs(
         "meta": {
             "collected_at": now,
             "project": project or (latest.get("meta") or {}).get("project") or "UNKNOWN",
+            "project_uid": (latest.get("meta") or {}).get("project_uid") or _get_project_uid(),
             "version": "2.2",
             "model": "4-layer-9-dim",
             "scope": "project",
@@ -340,6 +431,7 @@ def _aggregate_project_from_runs(
             "contracts_completed": sum(1 for r in run_summaries if r.get("task_id")),
             "note": "value/capability/efficiency/evolution 分层字段为所有契约 run 的跨契约累计聚合；runs 为完整历史索引",
             "raw_accumulated": raw,
+            "measurement_coverage": raw.get("measurement_coverage", {}),
         },
     }
     return agg
@@ -494,19 +586,27 @@ def persist_telemetry(args, telemetry: dict) -> dict:
 # ─── Layer 1: 价值层 — 回答"AI 创造多少价值" ──────────────
 
 def _collect_value_layer(args) -> dict:
-    tasks_assigned = max(args.tasks_assigned, 1)
+    measurements = getattr(args, "_p0_measurements", {})
+    assigned_m = measurements.get("tasks_assigned", {})
+    completed_m = measurements.get("tasks_completed", {})
+    first_m = measurements.get("tasks_first_pass", {})
+    tasks_assigned = args.tasks_assigned
 
     # P0: 目标准确率
-    goal_accuracy = _safe_ratio(args.tasks_completed, tasks_assigned)
+    goal_known = tasks_assigned is not None and args.tasks_completed is not None and tasks_assigned > 0
+    goal_accuracy = _safe_ratio(args.tasks_completed, tasks_assigned) if goal_known else None
 
     # P0: 首次成功率
-    first_pass_rate = _safe_ratio(args.tasks_first_pass, tasks_assigned)
+    first_known = args.tasks_first_pass is not None and args.tasks_completed is not None and args.tasks_completed > 0
+    first_pass_rate = _safe_ratio(args.tasks_first_pass, args.tasks_completed) if first_known else None
 
     # P1: 复合 ROI（含失败折现）
     compound_roi = _calc_compound_roi(args)
 
     # 目标准确率健康度
-    if goal_accuracy >= 0.80:
+    if goal_accuracy is None:
+        goal_health = "INSUFFICIENT_DATA"
+    elif goal_accuracy >= 0.80:
         goal_health = "L3_READY"  # 适合 L3 受监督自主
     elif goal_accuracy >= 0.60:
         goal_health = "L2_COLLAB"  # 仍处于 L2 协作阶段
@@ -515,8 +615,12 @@ def _collect_value_layer(args) -> dict:
 
     return {
         "goal_accuracy": {
-            "value": round(goal_accuracy, 4),
-            "display": f"{goal_accuracy * 100:.1f}%",
+            "value": round(goal_accuracy, 4) if goal_accuracy is not None else None,
+            "display": f"{goal_accuracy * 100:.1f}%" if goal_accuracy is not None else "N/A",
+            "status": completed_m.get("status", "DECLARED" if goal_known else "UNKNOWN"),
+            "source": completed_m.get("source", "legacy_input" if goal_known else "missing_source"),
+            "evidence": completed_m.get("evidence", []),
+            "measured_at": completed_m.get("measured_at"),
             "tasks_assigned": args.tasks_assigned,
             "tasks_completed": args.tasks_completed,
             "health": goal_health,
@@ -526,13 +630,18 @@ def _collect_value_layer(args) -> dict:
             },
         },
         "first_pass_rate": {
-            "value": round(first_pass_rate, 4),
-            "display": f"{first_pass_rate * 100:.1f}%",
+            "value": round(first_pass_rate, 4) if first_pass_rate is not None else None,
+            "display": f"{first_pass_rate * 100:.1f}%" if first_pass_rate is not None else "N/A",
+            "status": first_m.get("status", "DECLARED" if first_known else "UNKNOWN"),
+            "source": first_m.get("source", "legacy_input" if first_known else "missing_event_history"),
+            "evidence": first_m.get("evidence", []),
+            "measured_at": first_m.get("measured_at"),
             "tasks_first_pass": args.tasks_first_pass,
             "tasks_assigned": args.tasks_assigned,
             "impact_note": (
                 "首次成功率从 60%→80% 可降低约 50% 单任务 Token 成本"
-                if first_pass_rate < 0.80 else "首次成功率处于健康水平"
+                if first_pass_rate is not None and first_pass_rate < 0.80 else
+                "首次成功率处于健康水平" if first_pass_rate is not None else "缺少首次正式验证历史"
             ),
         },
         "compound_roi": compound_roi,
@@ -544,8 +653,8 @@ def _calc_compound_roi(args) -> dict:
     if not args.human_hourly_rate or not args.hours_saved_per_task:
         return {"status": "INSUFFICIENT_DATA", "detail": "缺少人力成本参数"}
 
-    tasks_completed = max(args.tasks_completed, 0)
-    tasks_assigned = max(args.tasks_assigned, 1)
+    tasks_completed = max(args.tasks_completed or 0, 0)
+    tasks_assigned = max(args.tasks_assigned or 0, 1)
     failure_rate = 1.0 - _safe_ratio(tasks_completed, tasks_assigned)
 
     # 节省的人力成本
@@ -581,25 +690,37 @@ def _calc_compound_roi(args) -> dict:
 # ─── Layer 2: 能力层 — 回答"Agent 有多自主" ──────────────
 
 def _collect_capability_layer(args) -> dict:
+    measurements = getattr(args, "_p0_measurements", {})
+    failure_m = measurements.get("constraint_failures_total", {})
+    healed_m = measurements.get("auto_healed", {})
     # P0: 约束自愈率
-    auto_heal_rate = _safe_ratio(args.auto_healed, args.constraint_failures_total)
+    auto_known = (args.auto_healed is not None and args.constraint_failures_total is not None
+                  and args.constraint_failures_total > 0)
+    auto_heal_rate = _safe_ratio(args.auto_healed, args.constraint_failures_total) if auto_known else None
 
     # HITL 升级率（已有，归入能力层）
     hitl_rate = _safe_ratio(args.hitl_count, max(args.execution_rounds, 1))
 
     # MUST 约束通过率
-    must_pass_rate = 1.0 - _safe_ratio(args.must_failed, max(args.must_constraints, 1))
+    must_pass_rate = (1.0 - _safe_ratio(args.must_failed, args.must_constraints)) if args.must_constraints > 0 else None
 
     # 综合自主性评分 (0-100)
-    autonomy_score = _calc_autonomy_score(auto_heal_rate, hitl_rate, must_pass_rate)
+    autonomy_score = _calc_autonomy_score(auto_heal_rate, hitl_rate, must_pass_rate) if auto_heal_rate is not None and must_pass_rate is not None else None
 
     return {
         "auto_heal_rate": {
-            "value": round(auto_heal_rate, 4),
-            "display": f"{auto_heal_rate * 100:.1f}%",
+            "value": round(auto_heal_rate, 4) if auto_heal_rate is not None else None,
+            "display": f"{auto_heal_rate * 100:.1f}%" if auto_heal_rate is not None else "N/A",
+            "status": failure_m.get("status", "DECLARED" if auto_known else "UNKNOWN"),
+            "source": failure_m.get("source", "legacy_input" if auto_known else "missing_event_history"),
+            "evidence": failure_m.get("evidence", []),
+            "measured_at": failure_m.get("measured_at"),
             "auto_healed": args.auto_healed,
             "failures_total": args.constraint_failures_total,
-            "health": "EXCELLENT" if auto_heal_rate >= 0.70 else "GOOD" if auto_heal_rate >= 0.40 else "NEEDS_WORK",
+            "health": ("NOT_APPLICABLE" if failure_m.get("status") == "NOT_APPLICABLE"
+                       else "INSUFFICIENT_DATA" if auto_heal_rate is None
+                       else "EXCELLENT" if auto_heal_rate >= 0.70
+                       else "GOOD" if auto_heal_rate >= 0.40 else "NEEDS_WORK"),
             "note": "Agent 自主修复约束失败的比例，直接反映自治修复能力",
         },
         "hitl_escalation_rate": {
@@ -610,21 +731,25 @@ def _collect_capability_layer(args) -> dict:
             "health": "LOW_TOUCH" if hitl_rate <= 0.10 else "MODERATE" if hitl_rate <= 0.30 else "HIGH_TOUCH",
         },
         "must_pass_rate": {
-            "value": round(must_pass_rate, 4),
-            "display": f"{must_pass_rate * 100:.1f}%",
+            "value": round(must_pass_rate, 4) if must_pass_rate is not None else None,
+            "display": f"{must_pass_rate * 100:.1f}%" if must_pass_rate is not None else "N/A",
+            "status": "MEASURED" if must_pass_rate is not None else "NOT_APPLICABLE",
+            "source": "constraint_matrix" if must_pass_rate is not None else "no_applicable_constraints",
             "must_passed": args.must_constraints - args.must_failed,
             "must_total": args.must_constraints,
         },
         "autonomy_score": {
-            "value": round(autonomy_score, 1),
-            "display": f"{autonomy_score:.1f}/100",
+            "value": round(autonomy_score, 1) if autonomy_score is not None else None,
+            "display": f"{autonomy_score:.1f}/100" if autonomy_score is not None else "N/A",
+            "status": "MEASURED" if autonomy_score is not None else "UNKNOWN",
             "components": {
                 "auto_heal_weight": 0.4,
                 "must_pass_weight": 0.35,
                 "hitl_weight": 0.25,
             },
             "health": (
-                "L3_READY" if autonomy_score >= 80
+                "INSUFFICIENT_DATA" if autonomy_score is None
+                else "L3_READY" if autonomy_score >= 80
                 else "L2_MATURE" if autonomy_score >= 60
                 else "L1_BASELINE"
             ),
@@ -651,12 +776,12 @@ def _collect_efficiency_layer(args) -> dict:
 
     # Token 效率：每任务平均 Token
     tokens_per_task = (
-        args.token_usage / max(args.tasks_assigned, 1)
+        args.token_usage / max(args.tasks_assigned or 0, 1)
         if args.token_usage > 0 else 0
     )
 
     # 执行效率：每轮次完成任务数
-    tasks_per_round = _safe_ratio(args.tasks_completed, max(args.execution_rounds, 1))
+    tasks_per_round = _safe_ratio(args.tasks_completed or 0, max(args.execution_rounds, 1))
 
     return {
         "context_compression": {
@@ -1074,18 +1199,20 @@ def main():
     parser.add_argument("--contract-total", type=int, default=0)
 
     # ── 价值层参数 ──
-    parser.add_argument("--tasks-assigned", type=int, default=0,
+    parser.add_argument("--tasks-assigned", type=int, default=None,
                         help="【P0】总分配任务数")
-    parser.add_argument("--tasks-completed", type=int, default=0,
+    parser.add_argument("--tasks-completed", type=int, default=None,
                         help="【P0】正确完成的任务数")
-    parser.add_argument("--tasks-first-pass", type=int, default=0,
+    parser.add_argument("--tasks-first-pass", type=int, default=None,
                         help="【P0】一次性正确完成的任务数")
 
     # ── 能力层参数 ──
-    parser.add_argument("--auto-healed", type=int, default=0,
+    parser.add_argument("--auto-healed", type=int, default=None,
                         help="【P0】Agent 自主修复的约束失败数")
-    parser.add_argument("--constraint-failures-total", type=int, default=0,
+    parser.add_argument("--constraint-failures-total", type=int, default=None,
                         help="【P0】约束失败总数（含人工修复）")
+    parser.add_argument("--p0-source", choices=["declared"], default=None,
+                        help="显式手工 P0 数字的来源类型；不传则自动从契约/Evidence/事件派生")
 
     # ── 价值层 ROI 参数 ──
     parser.add_argument("--human-hourly-rate", type=float, default=0.0,

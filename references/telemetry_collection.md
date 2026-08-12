@@ -14,6 +14,20 @@
 
 > 跳过逐任务遥测的任务，不得标记为"已完成"（见禁止事项）。
 
+### Evidence 完成后的遥测收口（v1.36.2）
+
+Agent 创建或完成更新 `EB-T-XXX.md` 后，不等待用户提醒，推荐运行：
+
+```bash
+python scripts/cli.py change verify --task T-XXX --project-dir .
+```
+
+`change verify` 先执行 Prove gate；通过后由工作流代码自动调用底层 `evidence finalize`。底层入口调用跨平台 Python `telemetry_workflow.py`，并机械确认单任务遥测、项目累计遥测、`dashboard.html` 和 `dashboard-T-XXX.html` 全部生成；Windows 不需要 Bash。`telemetry_tracker.py` 从 `SIGNED` 契约、合格 Evidence 与 `execution-events.jsonl` 派生 P0 原始计数，`collect_telemetry.py` 负责读取、汇总和持久化；“自动”表示工作流编排和产物生成，不表示自动填写事实、签署或批准。`SIGNED` 是不可变授权状态，完成态不要求契约迁移为 `COMPLETED`。
+
+关键指标采用 Measurement Contract：`value / status / source / evidence / measured_at`。状态为 `MEASURED / DERIVED / DECLARED / UNKNOWN / NOT_APPLICABLE`。缺事件历史显示 N/A，不补 0；未发生约束失败显示 NOT_APPLICABLE，不标为 NEEDS_WORK。手工传入五个 P0 数字时必须同时传 `--p0-source declared`。
+
+`--rebuild` 读取历史 `governance/telemetry/runs/*.json` 时兼容 v1.33 及更早旧格式：指标对象缺少 `status` 字段表示历史可信输入，可以参与累计；显式写成 `UNKNOWN` 或 `NOT_APPLICABLE` 的新格式仍不得聚合为 0 或有效值。
+
 ## 完整采集命令
 
 ```bash

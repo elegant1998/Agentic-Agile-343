@@ -1,0 +1,24 @@
+name: Windows native compatibility
+
+on: [push, pull_request]
+
+jobs:
+  test-windows:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install test dependency
+        run: python -m pip install pyyaml
+      - name: CLI smoke
+        run: python scripts/cli.py list
+      - name: Windows compatibility tests
+        run: python -m unittest tests.test_windows_command_runner tests.test_windows_bootstrap_and_token tests.test_windows_core_migration -v
+      - name: Full regression
+        run: python -m unittest discover -s tests -t . -v

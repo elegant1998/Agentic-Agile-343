@@ -35,12 +35,17 @@ COMMANDS = {
     "collect":    ("collect_telemetry.py", "收集遥测数据"),
     "merge":      ("collect_telemetry.py", "合并多模块遥测（--merge）"),
     "dashboard":  ("collect_telemetry.py", "生成/刷新仪表板（--rebuild）"),
+    "telemetry-track": ("telemetry_tracker.py", "追加执行事件或查看可信 P0 度量"),
+    "telemetry-run": ("telemetry_workflow.py", "跨平台运行遥测主流程"),
 
     # ── 验证体系 ──
     "verify":     ("verify_contract.py", "契约 AC 验证"),
     "audit":      ("audit_evidence.py", "证据包完整性审计"),
     "triangulate":("verify_triangulation.py", "三方一致性验证"),
     "rollback":   ("verify_rollback_safety.py", "回滚安全性验证"),
+    "verification": ("verification_plan.py", "风险驱动多层验证计划与独立证据检查"),
+    "evidence":     ("evidence_workflow.py", "Evidence 完成后调用遥测工作流并生成双 Dashboard（指标由 tracker 派生）"),
+    "release":      ("release_manifest.py", "单项目携证发布计划、就绪检查与事实记录"),
     "freshness":  ("verify_freshness.py", "工件时效检测"),
     "cross-module":("verify_cross_module.py", "跨模块接口契约验证"),
 
@@ -61,7 +66,13 @@ COMMANDS = {
 
     # ── 既有项目 Recon 与风险裁剪 ──
     "recon":      ("recon.py", "既有项目轻量 Recon（默认只读）"),
+    "envelope":   ("change_envelope.py", "Change Envelope 实际变更机械门禁"),
+    "characterize": ("characterize.py", "既有行为特征基线 plan/capture/verify"),
+    "change":      ("change_workflow.py", "既有代码安全变更统一状态入口"),
+    "bug":         ("bug_workflow.py", "Bug 分类、复现、验证与回溯入口"),
     "assess-risk":("assess_risk.py", "风险评估与治理模式推荐"),
+    "init":       ("init_governance.py", "风险驱动治理入口（默认 dry-run）"),
+    "maintain":   ("maintenance.py", "门禁自身治理与低风险维护通道"),
 }
 
 # 需要将子命令作为第一个参数传递给目标脚本的命令
@@ -93,13 +104,16 @@ def main():
         sys.exit(1)
 
     script_name, desc = COMMANDS[cmd]
+    extra_args = sys.argv[2:]
+    if cmd == "recon" and extra_args[:1] == ["task"]:
+        script_name = "task_recon.py"
+        extra_args = extra_args[1:]
     script_path = SCRIPTS_DIR / script_name
     if not script_path.exists():
         print(f"错误: 脚本不存在: {script_path}", file=sys.stderr)
         sys.exit(1)
 
     # 构建命令
-    extra_args = sys.argv[2:]
     subcmd = SUBCOMMAND_MAP.get(cmd)
     if subcmd:
         # 对于需要子命令的脚本（如 harness.py check），插入子命令

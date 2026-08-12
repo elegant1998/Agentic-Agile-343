@@ -34,6 +34,7 @@ import subprocess
 import sys
 from datetime import datetime, date
 from pathlib import Path
+from command_runner import run_command, run_shell
 
 
 def _load_yaml(path: Path) -> dict:
@@ -94,35 +95,14 @@ def is_exception_active(constraint_id: str, exceptions: list) -> dict | None:
 
 
 def _run_shell_check(check_cmd: str, project_dir: Path, timeout: int = 30) -> tuple[bool, str]:
-    """跨平台执行 shell check 命令。
-
-    Unix: bash -c '<cmd>'
-    Windows: 优先 bash（Git Bash/WSL），不可用时 shell=True（cmd.exe）
-    """
-    import shutil
-    use_bash = shutil.which("bash") is not None
-    try:
-        if use_bash:
-            result = subprocess.run(
-                ["bash", "-c", check_cmd],
-                capture_output=True, text=True,
-                timeout=timeout, cwd=str(project_dir)
-            )
-        else:
-            # Windows 无 bash 时降级到系统 shell
-            result = subprocess.run(
-                check_cmd, shell=True, capture_output=True, text=True,
-                timeout=timeout, cwd=str(project_dir)
-            )
-        passed = result.returncode == 0
-        detail = result.stderr.strip() or result.stdout.strip() or ("通过" if passed else "失败")
-        if len(detail) > 200:
-            detail = detail[:200] + "..."
-        return passed, detail
-    except subprocess.TimeoutExpired:
-        return False, f"检查超时（{timeout}s）"
-    except Exception as e:
-        return False, str(e)
+    """Legacy POSIX check. Windows callers must migrate to an explicit dialect."""
+    dialect = "posix" if sys.platform != "win32" else None
+    if not dialect:
+        return False, "UNSUPPORTED_SHELL_DIALECT: legacy shell check 未声明方言"
+    result = run_shell({"dialect": dialect, "script": check_cmd,
+                        "timeout_seconds": timeout}, project_dir)
+    detail = result.get("stderr") or result.get("stdout") or result.get("detail") or result["status"]
+    return result["status"] == "PASS", detail[:200]
 
 
 def _run_python_check(expr: str, project_dir: Path) -> tuple[bool, str]:
@@ -154,6 +134,18 @@ def run_check(constraint: dict, project_dir: Path) -> tuple[bool, str]:
     # Python 表达式 check（跨平台，check_type: python）
     if constraint.get("check_type") == "python":
         return _run_python_check(check_cmd, project_dir)
+
+    if constraint.get("check_type") == "command":
+        result = run_command(check_cmd, project_dir)
+        detail = result.get("stderr") or result.get("stdout") or result.get("detail") or result["status"]
+        return result["status"] == "PASS", detail[:200]
+
+    if constraint.get("check_type") == "shell":
+        spec = check_cmd if isinstance(check_cmd, dict) else {
+            "dialect": constraint.get("shell_dialect"), "script": check_cmd}
+        result = run_shell(spec, project_dir)
+        detail = result.get("stderr") or result.get("stdout") or result.get("detail") or result["status"]
+        return result["status"] == "PASS", detail[:200]
 
     # Shell check（跨平台：bash 优先，无 bash 时降级）
     return _run_shell_check(check_cmd, project_dir)
@@ -478,9 +470,15 @@ def _detect_test_command(project_dir: Path) -> dict:
                 return {"runner": "npm", "cmd": ["npm", "test"], "kind": "node"}
         except Exception:
             pass
-    # Python
-    if (project_dir / "pyproject.toml").exists() or (project_dir / "pytest.ini").exists() \
-       or (project_dir / "tests").is_dir() or list(project_dir.glob("test_*.py")):
+    # Python: prefer stdlib unittest for repo-local suites so Windows users do
+    # not need pytest for the public harness tests command.
+    tests_dir = project_dir / "tests"
+    if tests_dir.is_dir() or list(project_dir.glob("test_*.py")):
+        cmd = [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"]
+        if (tests_dir / "__init__.py").is_file():
+            cmd = [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-t", ".", "-v"]
+        return {"runner": "unittest", "cmd": cmd, "kind": "python"}
+    if (project_dir / "pyproject.toml").exists() or (project_dir / "pytest.ini").exists():
         return {"runner": "pytest", "cmd": [sys.executable, "-m", "pytest", "--tb=no", "-q"], "kind": "python"}
     # Go
     if (project_dir / "go.mod").exists():
@@ -512,21 +510,17 @@ def run_tests(project_dir: Path, params: dict | None = None) -> dict:
             "coverage": 0.0, "status": "NO_TEST_SUITE",
             "detail": "未检测到测试套件（无 package.json / pytest / go.mod / Cargo.toml / pom.xml / *.csproj）；SCOPE-V 未运行测试",
         }
-    try:
-        proc = subprocess.run(
-            info["cmd"], capture_output=True, text=True,
-            timeout=params.get("timeout", 300), cwd=str(project_dir),
-        )
-    except subprocess.TimeoutExpired:
+    execution = run_command({"argv": info["cmd"], "timeout_seconds": params.get("timeout", 300)}, project_dir)
+    if execution["status"] == "TIMEOUT":
         return {"ran": True, "runner": info["runner"], "total": 0, "passed": 0,
                 "failed": 0, "errors": 1, "coverage": 0.0, "status": "TIMEOUT",
                 "detail": f"测试执行超时（>{params.get('timeout', 300)}s）"}
-    except Exception as e:
+    if execution["status"] in {"COMMAND_NOT_FOUND", "INVALID_COMMAND_SPEC"}:
         return {"ran": True, "runner": info["runner"], "total": 0, "passed": 0,
                 "failed": 0, "errors": 1, "coverage": 0.0, "status": "ERROR",
-                "detail": f"测试执行异常: {e}"}
+                "detail": f"测试执行异常: {execution.get('detail')}"}
 
-    out = (proc.stdout or "") + (proc.stderr or "")
+    out = execution.get("stdout", "") + execution.get("stderr", "")
     result = _parse_test_output(info["runner"], out)
     result["ran"] = True
     result["runner"] = info["runner"]
@@ -556,6 +550,22 @@ def _parse_test_output(runner: str, out: str) -> dict:
         return _parse_mvn_test_output(out)
     if runner == "dotnet":
         return _parse_dotnet_test_output(out)
+    if runner == "unittest":
+        m = re.search(r"Ran (\d+) tests?", out)
+        if m:
+            base["total"] = int(m.group(1))
+        failed = 0
+        errors = 0
+        summary = re.search(r"FAILED \(([^)]+)\)", out)
+        if summary:
+            fm = re.search(r"failures=(\d+)", summary.group(1))
+            em = re.search(r"errors=(\d+)", summary.group(1))
+            failed = int(fm.group(1)) if fm else 0
+            errors = int(em.group(1)) if em else 0
+        base["failed"] = failed
+        base["errors"] = errors
+        base["passed"] = max(base["total"] - failed - errors, 0) if base["total"] else 0
+        return base
     if runner in ("vitest", "jest"):
         try:
             start = out.find("{")
@@ -686,20 +696,18 @@ def attempt_recovery(constraint: dict, project_dir: Path) -> tuple[bool, str]:
     if not recover_cmd:
         return False, "恢复策略缺少 command"
 
-    try:
-        result = subprocess.run(
-            ["bash", "-c", recover_cmd],
-            capture_output=True, text=True,
-            timeout=30,
-            cwd=str(project_dir)
-        )
-        if result.returncode == 0:
-            return True, f"自动恢复成功: {auto_recover.get('description', recover_cmd)}"
-        return False, f"恢复命令失败: {result.stderr.strip()[:100]}"
-    except subprocess.TimeoutExpired:
-        return False, "恢复命令超时"
-    except Exception as e:
-        return False, str(e)
+    command_type = auto_recover.get("command_type", "shell")
+    if command_type == "command":
+        result = run_command(recover_cmd, project_dir)
+    elif command_type == "shell":
+        spec = recover_cmd if isinstance(recover_cmd, dict) else {
+            "dialect": auto_recover.get("shell_dialect"), "script": recover_cmd}
+        result = run_shell(spec, project_dir)
+    else:
+        return False, "INVALID_COMMAND_SPEC: unknown recovery command_type"
+    if result["status"] == "PASS":
+        return True, f"自动恢复成功: {auto_recover.get('description', 'structured command')}"
+    return False, f"恢复命令失败[{result['status']}]: {(result.get('stderr') or result.get('detail') or '')[:100]}"
 
 
 def recover_constraints(project_dir: Path, domain: str = None,

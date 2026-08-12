@@ -151,7 +151,7 @@ python scripts/harness.py nfr-list
 
 ### 跨平台 check 原语（v1.15+）
 
-约束的 `check` 字段默认使用 shell 命令（bash 优先，Windows 无 bash 时降级到 cmd.exe）。对于需要跨平台兼容的约束，可使用 `check_type: python` 指定 Python 表达式：
+约束的 `check` 字段推荐使用结构化 `check_type: command` 或 `check_type: python`。Shell 只在确有必要时使用，并必须显式声明 `posix` / `powershell` / `cmd` 方言；缺少对应 Shell 时返回 UNSUPPORTED 并 fail closed。对于跨平台兼容的约束，可使用 `check_type: python` 指定 Python 表达式：
 
 ```yaml
 - id: C-STRUCT-01

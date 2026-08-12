@@ -1,32 +1,37 @@
-# SCOPE-V 执行循环（SDD + TDD 内嵌）
+# SCOPE-V 六控制面运行模型（SDD + TDD 内嵌）
 
 > 本文是 SKILL.md §2 的详细参考，按需加载。
 
-## SCOPE-V 循环图
+## 六个持续控制面
 
 ```
-         SDD 规约驱动                     TDD 测试驱动
-    ┌─────────────────────┐    ┌──────────────────────────┐
-    │                     │    │                          │
-Specify → Constrain → Orchestrate → Prove → Evolve → Verify
-   │          │            │           │         │         │
-   ▼          ▼            ▼           ▼         ▼         ▼
-意图契约   约束矩阵   Red:写失败测试  Green:最小实现  Refactor  全部门禁
-(IO签署)  (OA维护)   → AC→测试骨架  → 代码使测试通过 → 重构+反思  (Verify)
-   │                     │           │         │         │
-   │                     │           │         └─ 修复+重跑│
-   │                     └─ SDD ────→│            Evidence_Bundle.md
-   │                                │              (呼叫 HITL)
-   └─ Spec 定义 AC ────────────────→│
-                        verify_contract.py 事后验证
+S / C / O / P⇄E / V
+        │       │
+        └─ 证据驱动快内环
+
+V → Telemetry → S/C/O
+        运行反馈慢外环
 ```
 
-**SDD（规约驱动）**：Specify 阶段产出的意图契约就是 Spec。AC（验收标准）不是事后检查清单，而是驱动实现的**可执行规约**。`verify_contract.py --generate-tests` 从 AC 自动生成测试骨架，AS 的工作是让这些测试通过。
+SCOPE-V 不是要求任务只向前走一次的流程，而是六个持续控制面：
 
-**TDD（测试驱动）**：Orchestrate→Prove→Evolve 三步构成完整的 Red-Green-Refactor 循环：
+| 控制面 | 控制问题 | 主要证据 |
+|---|---|---|
+| Specify | 要实现什么、为什么、怎样验收？ | 意图、目标、非目标、AC、责任边界 |
+| Constrain | 哪些边界不可越过？ | 约束、权限、风险、围栏与人工决策点 |
+| Orchestrate | 怎样组织上下文、任务、工具和执行顺序？ | 工作路径、工具权限、真实 TDD Red |
+| Prove | 当前结果由什么证据支持？ | 测试、AC、约束和必要验证层 |
+| Evolve | 失败和偏差怎样被修正？ | 最小修正、重跑、反思和规则债处理 |
+| Verify | 证据是否足以形成当前裁决？ | 完整性、独立性、时效、责任与 Unknown |
+
+**SDD（规约驱动）**：Specify 产出的意图契约就是 Spec。AC 不是事后检查清单，而是驱动实现的**可执行规约**。`verify_contract.py --generate-tests` 从 AC 自动生成测试骨架，AS 的工作是让这些测试通过。
+
+**TDD（测试驱动）**：Orchestrate 与 `P⇄E` 快内环承载 Red-Green-Refactor：
 - **Red**：从契约 AC 生成测试 → 运行 → 全部失败（证明测试有效）
 - **Green**：AS 编写最小实现使测试通过
-- **Refactor**：Evolve 阶段重构代码 + 反思 + 反哺图谱
+- **Refactor**：Evolve 根据证据重构代码、测试或规则，然后回到 Prove；证据不足不得进入 Verify
+
+三大自治运行机制横跨六个控制面：上下文自治控制每个控制面的可信输入，执行自治负责编排、恢复和停止，进化自治在证据与责任边界内将教训回流。它们不是与 S、C、O、P、E、V 一一对应的流程阶段。
 
 ## 🔵 微检查点（Karpathy 规则10）
 
@@ -40,26 +45,39 @@ OA 确认无误后 AS 才能开始写代码。这个检查点只需 30 秒，但
 
 > ⚠️ **为什么不做更多**：不引入 BDD/Gherkin 层、不自动生成 Mock/Fixture、不做测试优先级排序。当前模型已经足够理解 AC 语义，过度框架化反而降低效率（superpowers 教训）。
 
-## 🔴 Verify 后强制遥测（v1.12 硬性规则）
+## 🔴 Evidence 完成后进入 Telemetry 慢外环（v1.36.2）
 
-> **每个意图契约（Intent_Contract_T-XXX）完成 Verify 阶段后，OA/AS 必须立即主动运行一次 `collect_telemetry.py` 采集遥测，并在对话中给出结果摘要，才能标记该任务为"已完成"。**
+> **每个意图契约（Intent_Contract_T-XXX）形成完整 Evidence Bundle 后，推荐完成入口是 `cli.py change verify`。它先执行 Prove gate；通过后由工作流代码自动调用 `cli.py evidence finalize`，从契约、Evidence 与事件账本派生可信指标并生成双 Dashboard。任一步失败都必须 BLOCKED，成功后才能标记该任务为“已完成”。**
 
-这是 SCOPE-V 的**第六步**——从五步循环扩展为「Specify → Constrain → Orchestrate → Prove → Evolve → Verify → **Telemetry**」：
+Telemetry 是 Verify 后的强制反馈证据，但不属于六控制面。它通过慢外环把运行事实送回后续控制：
 
 ```
-Specify → Constrain → Orchestrate → Prove → Evolve → Verify → 🔴 Telemetry
-                                                          │         │
-                                                          │         └─ collect_telemetry.py
-                                                          │            + 结果摘要给 IO
-                                                          └─ verify_contract.py
+V → Telemetry → S/C/O
+       │          ├─ 修订后续意图或 AC
+       │          ├─ 升级约束、风险与权限边界
+       │          └─ 调整上下文、工作图、工具和验证编排
+       └─ change verify → prove gate → evidence finalize → telemetry_workflow.py → collect_telemetry.py + 结果摘要给 IO
 ```
 
 **为什么强制**：
 - 遥测不是"可选的运营动作"，而是**判断 AI 是否真的在变好的唯一证据**
 - 跳过遥测 = 价值层/能力层指标停在基线 = 无法回答"这套治理架构到底有没有用"
 - 逐任务采集才能形成时间序列，发现退化趋势（如首次成功率连续下降）
+- 强制采集只证明反馈已捕获，不表示 Agent 可以自行改写已签署意图、约束或发布决定
 
-### 最小采集参数
+### 自动收口入口（推荐）
+
+```bash
+python scripts/cli.py change verify --task T-0XX --project-dir .
+```
+
+入口先确认 Prove gate 通过；随后自动确认契约、Evidence 任务归属、AC 结果和约束结果，再复用现有一键遥测。它不修改 Evidence、不代签或批准；失败时返回非零，任务保持未完成。以下直接采集命令保留为底层接口和故障诊断手段。
+
+```bash
+python scripts/cli.py evidence finalize --task T-0XX --project-dir .
+```
+
+### 底层最小采集参数
 
 每任务必填，**必须带 `--task`**：
 
@@ -88,6 +106,7 @@ python3 scripts/collect_telemetry.py \
 | `governance/telemetry/runs/telemetry-T-0XX.json` | **单次意图契约**遥测（scope=contract） |
 | `governance/telemetry.json` | **项目累积** + `runs[]` 历史索引（scope=project） |
 | `governance/dashboard.html` | 大屏：总览 ⇄ 单次 双向跳转 |
+| `governance/dashboard-T-0XX.html` | **单次意图契约** Dashboard |
 
 - 总遥测 → 单次：`dashboard.html` 索引表，或 `dashboard.html?task=T-0XX`
 - 单次 → 总遥测：单次页导航「返回项目总遥测」

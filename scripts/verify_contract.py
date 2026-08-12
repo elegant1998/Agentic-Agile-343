@@ -70,6 +70,7 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 from textwrap import dedent
+from command_runner import run_command, run_shell
 
 try:
     import yaml
@@ -81,24 +82,20 @@ except ImportError:
 
 # ─── 验证执行器 ───────────────────────────────────────────
 
-def verify_shell(command: str, project_dir: Path, timeout: int = 30) -> tuple[bool, str]:
+def verify_shell(command: str, project_dir: Path, timeout: int = 30, dialect: str = None) -> tuple[bool, str]:
     """执行 shell 命令验证"""
-    try:
-        result = subprocess.run(
-            ["bash", "-c", command],
-            capture_output=True, text=True,
-            timeout=timeout,
-            cwd=str(project_dir),
-        )
-        passed = result.returncode == 0
-        detail = result.stdout.strip() or result.stderr.strip() or ("通过" if passed else "失败")
-        if len(detail) > 300:
-            detail = detail[:300] + "..."
-        return passed, detail
-    except subprocess.TimeoutExpired:
-        return False, f"超时（{timeout}s）"
-    except Exception as e:
-        return False, str(e)
+    if not dialect:
+        return False, "Shell AC 必须显式声明方言（posix/powershell/cmd）"
+    result = run_shell({"dialect": dialect, "script": command,
+                        "timeout_seconds": timeout}, project_dir)
+    detail = result.get("stdout") or result.get("stderr") or result.get("detail") or result["status"]
+    return result["status"] == "PASS", detail[:300]
+
+
+def verify_command(command: dict, project_dir: Path) -> tuple[bool, str]:
+    result = run_command(command, project_dir)
+    detail = result.get("stdout") or result.get("stderr") or result.get("detail") or result["status"]
+    return result["status"] == "PASS", detail[:300]
 
 
 def verify_http(method: str, url: str, headers: dict, expect: dict,
@@ -280,14 +277,14 @@ def _generate_python_tests(task_id, domain, ac_list, contract, contract_path):
     # 检测需要的 import
     needs_db = any(ac.get("verify", {}).get("type") == "db" for ac in ac_list)
     needs_http = any(ac.get("verify", {}).get("type") == "http" for ac in ac_list)
-    needs_shell = any(ac.get("verify", {}).get("type") == "shell" for ac in ac_list)
+    needs_shell = any(ac.get("verify", {}).get("type") in {"shell", "command"} for ac in ac_list)
 
     if needs_db:
         lines.append('from sqlalchemy import create_engine, text')
     if needs_http:
         lines.append(f'from src.main import app  # 根据实际项目调整')
     if needs_shell:
-        lines.append('import subprocess')
+        lines.extend(['from pathlib import Path', 'from command_runner import run_command, run_shell'])
 
     lines.extend([
         '',
@@ -357,8 +354,14 @@ def _generate_python_tests(task_id, domain, ac_list, contract, contract_path):
 
         elif vtype == "shell":
             command = verify_cfg.get("command", "true")
-            lines.append(f'    result = subprocess.run(["bash", "-c", """{command}"""], capture_output=True, text=True)')
-            lines.append(f'    assert result.returncode == 0, f"命令失败: {{result.stderr}}"')
+            dialect = verify_cfg.get("dialect")
+            lines.append(f'    result = run_shell({{"dialect": {dialect!r}, "script": {command!r}}}, Path.cwd())')
+            lines.append(f'    assert result["status"] == "PASS", result')
+
+        elif vtype == "command":
+            command = verify_cfg.get("command", {})
+            lines.append(f'    result = run_command({command!r}, Path.cwd())')
+            lines.append(f'    assert result["status"] == "PASS", result')
 
         elif vtype == "assert":
             expression = verify_cfg.get("expression", "True")
@@ -660,7 +663,10 @@ def verify_contract(contract_path: Path, project_dir: Path,
 
         try:
             if vtype == "shell":
-                ok, detail = verify_shell(verify_cfg.get("command", "true"), project_dir)
+                ok, detail = verify_shell(verify_cfg.get("command", "true"), project_dir,
+                                          dialect=verify_cfg.get("dialect"))
+            elif vtype == "command":
+                ok, detail = verify_command(verify_cfg.get("command", {}), project_dir)
             elif vtype == "http":
                 url = verify_cfg.get("url", "")
                 if base_url and url.startswith("/"):

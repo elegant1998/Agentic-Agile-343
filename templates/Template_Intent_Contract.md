@@ -6,7 +6,7 @@
 |------|-----|
 | 任务 ID | T-XXX |
 | 契约版本 | 1.0 |
-| 状态 | PENDING / SIGNED / COMPLETED / ARCHIVED |
+| 状态 | PENDING / SIGNED / ARCHIVED |
 | 创建日期 | YYYY-MM-DD |
 | 确认人 (IO) | _________ |
 | 来源图谱 | Intent_Graph.md |
@@ -154,3 +154,5 @@ python cli.py <input.csv> [--config <config.yaml>]
 > **签署即表示**：IO 已审阅以上全部条款，同意该契约作为本阶段唯一可执行的需求依据。任何偏离此契约的实现均视为不合规。签署后，AS 有权依据此契约开始 SCOPE-V 执行循环。
 
 > ⚠️ **本签署区由 IO（意图主理人）亲自填写署名与日期，OA 不得代填或将状态标记为 SIGNED。** 未经 IO 显式签署，契约状态应保持 `PENDING`，不得据此开始编码（C-PROC-01）。
+>
+> `SIGNED` 是契约的不可变 IO 授权状态，不随任务完成而迁移为 `COMPLETED`。任务完成由合格 Evidence、遥测与图谱/事件事实独立派生。

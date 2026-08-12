@@ -17,13 +17,28 @@ def calc_certificate_eligibility(value_layer: dict, capability_layer: dict) -> d
     mp = capability_layer.get("must_pass_rate") or {}
     au = capability_layer.get("autonomy_score") or {}
 
+    critical = {"goal_accuracy": ga, "first_pass_rate": fp, "auto_heal_rate": ah}
+    unavailable = [name for name, metric in critical.items()
+                   if metric.get("status") in ("UNKNOWN", "NOT_APPLICABLE")
+                   or metric.get("value") is None]
+    if unavailable:
+        return {
+            "eligible": False, "suggested_level": None,
+            "label": "INSUFFICIENT_DATA", "cta_enabled": False,
+            "cta_text": "关键指标数据不足，暂不可申请证书",
+            "apply_url": "http://agentic.iloveagile.me/project-autonomy-certificate/apply",
+            "what_is_it": "证书资格必须由有来源、可复验的关键遥测指标支持。",
+            "reasons": ["关键指标缺少可信数据: " + ", ".join(unavailable)],
+            "metrics": {name: metric.get("value") for name, metric in critical.items()},
+        }
+
     autonomy = float(au.get("value") or 0)
     tasks = int(ga.get("tasks_completed") or 0)
     first_pass = float(fp.get("value") or 0)
     must_pass = float(mp.get("value") or 0)
     auto_heal = float(ah.get("value") or 0)
 
-    apply_url = "http://agentic.iloveagile.com/project-autonomy-certificate/apply"
+    apply_url = "http://agentic.iloveagile.me/project-autonomy-certificate/apply"
     what_is_it = (
         "项目自治成熟度证书（AASC Project Autonomy Certificate）是组织在智能体敏捷（Agentic Agile）成熟度模型上达到 L3 受控自治 或 L4 自治超进化 后，可申请的项目级认证。证书针对「项目」而非个人；需在<a href='http://agentic.iloveagile.me/'>Agentic Agile 智能体敏捷体系认证中心网站</a>申请并签发，可下载 PDF。L1/L2 不能申请证书——仅用本仪表盘作成长反馈。"
     )

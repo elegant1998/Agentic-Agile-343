@@ -120,14 +120,17 @@ constraints:
     domain: STYLE
     level: MUST
     description: "AI 编码规范文件存在且非空"
-    check: "test -f governance/AI_Coding_Guide.md && test -s governance/AI_Coding_Guide.md"
+    check_type: python
+    check: "(project_dir / 'governance/AI_Coding_Guide.md').is_file() and (project_dir / 'governance/AI_Coding_Guide.md').stat().st_size > 0"
     watch_paths: ["governance/AI_Coding_Guide.md"]
     gate: G0
     on_failure: "block"
     owner: "OA"
     evidence: "文件存在性检查输出 + AI_Coding_Guide.md 内容快照"
     auto_recover:
-      command: "cp templates/Template_AI_Coding_Guide.md governance/AI_Coding_Guide.md"
+      command_type: command
+      command:
+        argv: [python, -c, "from pathlib import Path; p=Path('governance'); p.mkdir(exist_ok=True); (p/'AI_Coding_Guide.md').write_bytes(Path('templates/Template_AI_Coding_Guide.md').read_bytes())"]
       description: "从模板���建 AI_Coding_Guide.md"
 
   - id: C-STYLE-02
@@ -146,21 +149,23 @@ constraints:
     domain: STYLE
     level: SHOULD
     description: "至少 1 条硬性红线已从 [待 OA 填写] 改为实际规则"
-    check: "grep -q '| [0-9] | [^[]' governance/AI_Coding_Guide.md"
+    check_type: python
+    check: "any(line.startswith('|') and '[待' not in line for line in (project_dir / 'governance/AI_Coding_Guide.md').read_text(encoding='utf-8').splitlines())"
     watch_paths: ["governance/AI_Coding_Guide.md"]
     gate: G0
     on_failure: "warn"
     owner: "OA"
-    evidence: "grep 匹配输出"
+    evidence: "Python 内容检查输出"
     domain: STYLE
     level: SHOULD
     description: "每条红线包含原因说明（帮助 AI 举一反三）"
-    check: "grep -q '原因' governance/AI_Coding_Guide.md"
+    check_type: python
+    check: "'原因' in (project_dir / 'governance/AI_Coding_Guide.md').read_text(encoding='utf-8')"
     watch_paths: ["governance/AI_Coding_Guide.md"]
     gate: G0
     on_failure: "warn"
     owner: "OA"
-    evidence: "grep 匹配输出"
+    evidence: "Python 内容检查输出"
     manual: true
 
   # ===== STRUCT =====
@@ -168,21 +173,25 @@ constraints:
     domain: STRUCT
     level: MUST
     description: "治理文档目录 governance/ 存在"
-    check: "test -d governance/"
+    check_type: python
+    check: "(project_dir / 'governance').is_dir()"
     watch_paths: ["governance/"]
     gate: G1
     on_failure: "block"
     owner: "OA"
-    evidence: "test -d 退出码 + 目录列表"
+    evidence: "Python 目录存在性检查"
     auto_recover:
-      command: "mkdir -p governance/"
+      command_type: command
+      command:
+        argv: [python, -c, "from pathlib import Path; Path('governance').mkdir(parents=True, exist_ok=True)"]
       description: "自动创建 governance/ 目录"
 
   - id: C-STRUCT-02
     domain: STRUCT
     level: MUST
     description: "意图图谱和约束矩阵文件存在"
-    check: "test -f governance/Intent_Graph.md && test -f governance/constraints.yaml"
+    check_type: python
+    check: "all((project_dir / p).is_file() for p in ['governance/Intent_Graph.md', 'governance/constraints.yaml'])"
     watch_paths: ["governance/Intent_Graph.md", "governance/constraints.yaml"]
     gate: G1
     on_failure: "block"
@@ -193,7 +202,8 @@ constraints:
     domain: STRUCT
     level: SHOULD
     description: "项目源码目录 src/ 和测试目录 tests/ 存在 [CLI/Lib 项目可按需调整路径]"
-    check: "test -d src/ && test -d tests/"
+    check_type: python
+    check: "all((project_dir / p).is_dir() for p in ['src', 'tests'])"
     watch_paths: ["src/", "tests/"]
     gate: G1
     on_failure: "warn"
@@ -205,18 +215,20 @@ constraints:
     domain: DATA
     level: MUST
     description: "意图图谱中包含项目名称"
-    check: "grep -q 'YOUR_PROJECT_NAME' governance/Intent_Graph.md"
+    check_type: python
+    check: "'YOUR_PROJECT_NAME' in (project_dir / 'governance/Intent_Graph.md').read_text(encoding='utf-8')"
     watch_paths: ["governance/Intent_Graph.md"]
     gate: G2
     on_failure: "block"
     owner: "IO"
-    evidence: "grep 输出"
+    evidence: "Python 内容检查输出"
 
   - id: C-DATA-02
     domain: DATA
     level: MUST
     description: "约束矩阵中包含至少一条 MUST 约束"
-    check: "test $(grep -c 'MUST' governance/constraints.yaml 2>/dev/null || echo 0) -gt 0"
+    check_type: python
+    check: "'MUST' in (project_dir / 'governance/constraints.yaml').read_text(encoding='utf-8')"
     watch_paths: ["governance/constraints.yaml"]
     gate: G2
     on_failure: "block"
@@ -228,7 +240,8 @@ constraints:
     domain: BEHAVE
     level: SHOULD
     description: "核心脚本可被 Python 解析 [按项目语言调整]"
-    check: "python3 -c 'import ast; ast.parse(open(\"scripts/collect_telemetry.py\").read())'"
+    check_type: python
+    check: "__import__('ast').parse((project_dir / 'scripts/collect_telemetry.py').read_text(encoding='utf-8')) is not None"
     watch_paths: ["scripts/collect_telemetry.py"]
     gate: G3
     on_failure: "warn"
@@ -249,7 +262,9 @@ constraints:
     #        必须用点号 `--coverage.reporter=json-summary` 或直接写进配置，
     #        否则命令报错 → 门禁 C-QUAL-01 误判失败。
     #   harness 的 _parse_coverage 只读 coverage/coverage-summary.json
-    check: "python3 -m pytest --cov=src --cov-report=term --cov-fail-under=80 tests/"
+    check_type: command
+    check:
+      argv: [python, -m, pytest, --cov=src, --cov-report=term, --cov-fail-under=80, tests]
     watch_paths: ["src/", "tests/"]
     gate: G4
     on_failure: "block"

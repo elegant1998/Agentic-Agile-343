@@ -66,7 +66,7 @@ constraints:
 ```
 
 每条约束包含：
-- `check`: 可执行的 shell 命令（退出码 0 = 通过；bash 优先，Windows 降级到 cmd.exe）
+- `check`: 可执行检查。推荐 `check_type: command` 的 argv 数组或 `check_type: python`；Shell 检查必须显式声明 `posix` / `powershell` / `cmd` 方言，缺失时 fail closed。
 - `check_type`: 可选，设为 `python` 时 `check` 作为 Python 表达式执行（跨平台，可访问 `project_dir` 和 `Path`）
 - `watch_paths`: 关联文件列表（变更时触发检查），兼作约束生效范围（Scope）
 - `gate`: 所属门禁
@@ -116,10 +116,10 @@ python scripts/harness.py check --domain STRUCT,DATA --format json
 
 手动修复（若自动引导失败）:
 ```bash
-python3 -m venv ~/.agentic-agile-343/venv
-~/.agentic-agile-343/venv/bin/pip install pyyaml
-# 之后采集时带上:
-HARNESS_PY=~/.agentic-agile-343/venv/bin/python python scripts/collect_telemetry.py ...
+python -m venv ~/.agentic-agile-343/venv
+python -m pip install pyyaml
+# 之后直接使用统一入口；Windows/macOS/Linux 均由 _bootstrap.py 解析正确解释器
+python scripts/cli.py check --all
 ```
 
 ### 陷阱 2: npx 类 check 超时

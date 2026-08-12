@@ -1,0 +1,36 @@
+schema_version: "1.0"
+release_id: "REL-1.2.3"
+version: "1.2.3"
+status: "DRAFT" # IO must explicitly authorize; readiness never means released.
+tasks: ["T-001"]
+source:
+  commit: "0000000000000000000000000000000000000000"
+  dirty: false
+  dirty_paths: []
+artifact:
+  path: "dist/app.tar.gz"
+  sha256: ""
+  size: 0
+configuration:
+  paths: []
+  sha256: null
+evidence:
+  - task_id: "T-001"
+    contract: {path: "governance/contracts/Intent_Contract_T-001.md", sha256: "", size: 0}
+    bundle: {path: "governance/evidence/EB-T-001.md", sha256: "", size: 0}
+    telemetry: {path: "governance/telemetry/runs/telemetry-T-001.json", sha256: "", size: 0}
+    graph: {path: "governance/Intent_Graph.md", sha256: "", size: 0}
+    verification_plan: null
+    freshness_hours: 168
+approvals: [] # Qualified human release owner only; AI/OA cannot approve.
+rollback:
+  trigger: "TBD"
+  method: "TBD"
+  owner: "TBD"
+  data_compatibility: "TBD"
+  configuration_compatibility: "TBD"
+  reverify: "TBD"
+promotions:
+  - environment: "release"
+    artifact_sha256: ""
+events: [] # Append-only released / rolled_back facts; no deployment execution.

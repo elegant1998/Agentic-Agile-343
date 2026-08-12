@@ -8,6 +8,8 @@ from collections import Counter
 from datetime import date
 from pathlib import Path
 
+from context_providers import build_context, build_project_maps
+
 IGNORED_PARTS = {".git", ".venv", "venv", "node_modules", "__pycache__"}
 LANGUAGE_SUFFIXES = {".py": "Python", ".js": "JavaScript", ".ts": "TypeScript", ".tsx": "TypeScript", ".java": "Java", ".go": "Go", ".rs": "Rust", ".cpp": "C++", ".c": "C"}
 
@@ -21,7 +23,10 @@ def _files(project: Path) -> list[Path]:
     return sorted(path for path in project.rglob("*") if path.is_file() and not any(part in IGNORED_PARTS for part in path.parts))
 
 
-def scan_project(project_dir: Path | str) -> dict:
+def scan_project(
+    project_dir: Path | str, provider_inputs=(), agent_providers=(), context_max_items=None,
+    context_recommendations=True, auto_context=True, persistence=True,
+) -> dict:
     """只读扫描既有项目，明确区分事实、保留项和未知项。"""
     project = Path(project_dir).expanduser().resolve()
     if not project.is_dir():
@@ -58,6 +63,13 @@ def scan_project(project_dir: Path | str) -> dict:
         unknown.append("Change history and tracked/untracked ownership are unknown because Git is unavailable")
     if not languages:
         unknown.append("Implementation language and executable entry points require human confirmation")
+    map_build = None
+    if auto_context and not provider_inputs:
+        map_build = build_project_maps(project, persistence=persistence)
+    context = build_context(project, provider_inputs, agent_providers, context_max_items, context_recommendations)
+    context["map_build"] = map_build
+    context["project_root"] = str(project)
+    context["source_revision"] = _git(project, "rev-parse", "HEAD")[1] or None
     return {
         "recon": {"version": "1.0", "date": date.today().isoformat(), "mode": "lightweight-existing"},
         "project": {"name": project.name, "path": str(project), "existing": existing},
@@ -66,6 +78,7 @@ def scan_project(project_dir: Path | str) -> dict:
         "baseline": baseline,
         "preserve": preserve,
         "unknown": unknown or ["No blocking unknowns detected; IO review is still required"],
+        "context": context,
         "change_envelope": {
             "allowed": ["governance/", "tests/", "files explicitly named by a signed contract"],
             "protected": untracked + ["existing public entry points", "signed contracts", "MUST constraints"],
@@ -86,6 +99,7 @@ def render_recon(result: dict, output_format: str = "markdown") -> str:
         raise ValueError(f"unsupported format: {output_format}")
     project = result["project"]
     envelope = result["change_envelope"]
+    context = result["context"]
     return f"""# Recon Baseline: {project['name']}
 
 **Mode**: lightweight-existing
@@ -103,6 +117,13 @@ def render_recon(result: dict, output_format: str = "markdown") -> str:
 
 {_bullets(result['unknown'])}
 
+## Context Enhancement
+
+- Level: {context['level']}
+- Providers: {', '.join(item['name'] for item in context['providers']) or 'none'}
+- Trace links: {len(context['trace_links'])}
+{_bullets(context['unknown'] + context['recommendations'])}
+
 ## Change Envelope
 
 ### Allowed
@@ -119,9 +140,19 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="既有项目轻量 Recon（默认只读）")
     parser.add_argument("--project-dir", default=".")
     parser.add_argument("--format", choices=["markdown", "md", "yaml", "yml"], default="markdown")
+    parser.add_argument("--context-provider", action="append", default=[], help="Explicit JSON/YAML Document Map or Code Map artifact")
+    parser.add_argument("--agent-provider", action="append", default=[], help="Provider exposed by the Agent host; capability disclosure only")
+    parser.add_argument("--context-max-items", type=int, help="Maximum items retained in each context section")
+    parser.add_argument("--no-context-recommendations", action="store_true", help="Suppress optional provider suggestions")
+    parser.add_argument("--no-auto-context", action="store_true", help="Do not initialize project maps when providers are available")
+    parser.add_argument("--persistence", choices=["true", "false"], default="true", help="Persist provider indexes at project scope")
     parser.add_argument("--output", help="显式指定时才写文件；否则输出到 stdout")
     args = parser.parse_args()
-    rendered = render_recon(scan_project(args.project_dir), args.format)
+    rendered = render_recon(scan_project(
+        args.project_dir, args.context_provider, args.agent_provider,
+        args.context_max_items, not args.no_context_recommendations,
+        not args.no_auto_context, args.persistence == "true",
+    ), args.format)
     if args.output:
         output = Path(args.output).expanduser()
         output.parent.mkdir(parents=True, exist_ok=True)

@@ -152,7 +152,7 @@ integration_dag:
 # ═══════════════════════════════════════════════════════════
 # §5 治理自动化（工具无关版本）
 # ═══════════════════════════════════════════════════════════
-# 每个检查提供多语言等效命令。各 AI 工具自行选择可执行的版本。
+# 每个检查提供跨平台结构化命令或 Python 验证。各 AI 工具选择可执行版本。
 # 如果工具不支持任何自动化版本，降级为 manual。
 
 checks:
@@ -160,24 +160,21 @@ checks:
     desc: "API 响应格式统一为 {code, data, message}"
     gate: G0
     verify:
-      shell: "grep -r 'code.*data.*message' src/api/ | wc -l"
-      python: "python3 scripts/verify_contract.py --check api-format"
+      command: {argv: [python, scripts/verify_contract.py, --check, api-format]}
       manual: "人工抽查 3 个 API 端点的响应格式"
 
   - id: "no-hardcoded-secrets"
     desc: "源代码中无硬编码密钥/令牌"
     gate: G6
     verify:
-      shell: "grep -rE '(password|secret|token|key)\\s*=\\s*[\"\\x27]' src/ --include='*.py' || true"
-      python: "python3 scripts/harness.py check --gate G6"
+      command: {argv: [python, scripts/harness.py, check, --gate, G6]}
       manual: "人工审查 src/ 目录"
 
   - id: "test-coverage"
     desc: "测试覆盖率 ≥ 80%"
     gate: G4
     verify:
-      shell: "pytest --cov=src --cov-fail-under=80 tests/"
-      python: "python3 -m pytest --cov=src --cov-fail-under=80 tests/"
+      command: {argv: [python, -m, pytest, --cov=src, --cov-fail-under=80, tests]}
       manual: "运行测试套件并检查覆盖率报告"
 
 # ═══════════════════════════════════════════════════════════

@@ -17,22 +17,45 @@ import argparse
 import json
 import os
 import re
-import subprocess
 import sys
 from pathlib import Path
 from datetime import datetime
 
+from command_runner import run_command
 
-def run(cmd, cwd=None, timeout=30):
-    """运行 shell 命令，返回 (returncode, stdout, stderr)"""
-    try:
-        r = subprocess.run(cmd, shell=True, capture_output=True, text=True,
-                           timeout=timeout, cwd=cwd)
-        return r.returncode, r.stdout.strip(), r.stderr.strip()
-    except subprocess.TimeoutExpired:
-        return -1, "", "timeout"
-    except Exception as e:
-        return -2, "", str(e)
+
+# SCOPE-V 的五道机械门检查控制状态转换，而不是增加线性流程阶段。
+# 此映射是代码与现行规范共用的唯一状态语义源；不得扩展为第六道门。
+GATE_CONTROL_STATES = {
+    "pre": "S+C READY → O ELIGIBLE",
+    "coding": "O PLANNED → O RED_CONFIRMED",
+    "prove": "P⇄E EVIDENCING → V ELIGIBLE",
+    "closing": "V VERIFIED → FEEDBACK CAPTURED",
+    "bug": "CLOSED FACT → S/C/O/P⇄E REENTRY",
+}
+
+
+def run(argv, cwd=None, timeout=30):
+    """运行 argv 命令，返回 (returncode, stdout, stderr)。"""
+    if not isinstance(argv, list):
+        return -2, "", "INVALID_COMMAND_SPEC: gate checks require argv list"
+    project = Path(cwd or ".").resolve()
+    result = run_command(
+        {"argv": argv, "cwd": ".", "timeout_seconds": timeout},
+        project,
+    )
+    status = result["status"]
+    if status == "PASS":
+        rc = 0
+    elif status == "FAIL":
+        rc = result.get("returncode") if result.get("returncode") is not None else 1
+    elif status == "TIMEOUT":
+        rc = -1
+    else:
+        rc = -2
+    stdout = (result.get("stdout") or "").strip()
+    stderr = (result.get("stderr") or result.get("detail") or status).strip()
+    return rc, stdout, stderr
 
 
 def check(label, condition, detail=""):
@@ -47,12 +70,10 @@ def run_python_tests(project_dir, timeout=120):
     优先使用项目环境中已安装的 pytest；否则使用标准库 unittest。
     返回: {framework, returncode, total, passed, failed, output}
     """
-    probe_rc, _, _ = run(
-        "python3 -c 'import pytest'", cwd=str(project_dir), timeout=10
-    )
+    probe_rc, _, _ = run([sys.executable, "-c", "import pytest"], cwd=str(project_dir), timeout=10)
     if probe_rc == 0:
         framework = "pytest"
-        rc, out, err = run("python3 -m pytest -q", cwd=str(project_dir), timeout=timeout)
+        rc, out, err = run([sys.executable, "-m", "pytest", "-q"], cwd=str(project_dir), timeout=timeout)
         output = "\n".join(part for part in (out, err) if part)
         passed = sum(int(value) for value in re.findall(r"(\d+) passed", output))
         failed = sum(
@@ -62,9 +83,19 @@ def run_python_tests(project_dir, timeout=120):
         total = passed + failed
     else:
         framework = "unittest"
-        unittest_cmd = "python3 -m unittest discover -s tests -v"
+        unittest_cmd = [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"]
         if (Path(project_dir) / "tests" / "__init__.py").exists():
-            unittest_cmd = "python3 -m unittest discover -s tests -t . -v"
+            unittest_cmd = [
+                sys.executable,
+                "-m",
+                "unittest",
+                "discover",
+                "-s",
+                "tests",
+                "-t",
+                ".",
+                "-v",
+            ]
         rc, out, err = run(
             unittest_cmd,
             cwd=str(project_dir),
@@ -105,6 +136,17 @@ def check_signed(content):
         "auto-sign", "auto sign", "（Grill-Me", "Grill-Me 自动",
         "自动盖章", "默认已签", "自动生效",
     ]
+    def in_prohibitive_section(position):
+        """标记是否位于明确的非目标/禁止事项 Markdown 章节。"""
+        headings = re.findall(r"^#{1,6}\s*(.+?)\s*$", content[:position], re.M)
+        if not headings:
+            return False
+        current = headings[-1].strip().lower()
+        return any(
+            token in current
+            for token in ["非目标", "禁止事项", "禁止操作", "不允许", "排除项", "non-goal", "prohibited"]
+        )
+
     for m in autosign_markers:
         idx = content.find(m)
         while idx != -1:
@@ -114,7 +156,7 @@ def check_signed(content):
             if line_end == -1:
                 line_end = len(content)
             line = content[line_start:line_end]
-            if any(neg in line for neg in NEGATION_TOKENS):
+            if any(neg in line for neg in NEGATION_TOKENS) or in_prohibitive_section(line_start):
                 # 否定语境（如"非 OA 代签"），属反代签正向说明，跳过本次匹配
                 idx = content.find(m, idx + len(m))
                 continue
@@ -212,8 +254,11 @@ def gate_coding(task_id, project_dir):
     if test_files:
         pkg = project_dir / "package.json"
         if pkg.exists():
-            rc, out, err = run("npx vitest run --reporter=json 2>/dev/null || true",
-                               cwd=str(project_dir), timeout=60)
+            rc, out, err = run(
+                ["npx", "vitest", "run", "--reporter=json"],
+                cwd=str(project_dir),
+                timeout=60,
+            )
             try:
                 data = json.loads(out)
                 total = data.get("numTotalTests", 0)
@@ -259,8 +304,11 @@ def gate_prove(task_id, project_dir):
     test_total = 0
     test_passed = 0
     if pkg.exists():
-        rc, out, err = run("npx vitest run --reporter=json 2>/dev/null || true",
-                           cwd=str(project_dir), timeout=120)
+        rc, out, err = run(
+            ["npx", "vitest", "run", "--reporter=json"],
+            cwd=str(project_dir),
+            timeout=120,
+        )
         try:
             data = json.loads(out)
             test_total = data.get("numTotalTests", 0)
@@ -280,6 +328,17 @@ def gate_prove(task_id, project_dir):
             result["returncode"] == 0 and test_passed > 0,
             "Python 测试存在失败或未发现测试",
         )
+        try:
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            from telemetry_workflow import record_verification_context
+            record_verification_context(project_dir, task_id, {
+                "total": result["total"], "passed": result["passed"],
+                "failed": result.get("failed", 0),
+                "status": "PASS" if result["returncode"] == 0 and result["total"] else "FAIL",
+                "runner": result["framework"],
+            })
+        except (OSError, ValueError, ImportError):
+            pass
 
     # 2. test-total > 0
     all_pass &= check(f"test-total > 0（当前 {test_total}）", test_total > 0,
@@ -298,9 +357,52 @@ def gate_prove(task_id, project_dir):
 
     # 4. tsc / build 通过
     if pkg.exists():
-        rc, out, err = run("npx tsc --noEmit 2>&1 | head -1", cwd=str(project_dir), timeout=60)
+        rc, out, err = run(["npx", "tsc", "--noEmit"], cwd=str(project_dir), timeout=60)
+        detail = (out or err).splitlines()[0][:80] if (out or err) else "有类型错误"
         all_pass &= check("TypeScript 编译通过", rc == 0,
-                          out[:80] if out else "有类型错误")
+                          detail)
+
+    # 5. 已存在正式 Change Envelope 时，实际 Git 变更不得越界。
+    # 没有围栏的项目保持既有行为；DRAFT/无效/Unknown 围栏由检查器 fail closed。
+    envelope = project_dir / "governance" / "Change_Envelope.yaml"
+    if envelope.exists():
+        from change_envelope import check_envelope
+        envelope_result = check_envelope(project_dir, task_id, envelope)
+        detail = "; ".join(envelope_result.get("errors", []))
+        if not detail and not envelope_result["passed"]:
+            detail = "outside=" + ",".join(envelope_result.get("outside", []))
+            if envelope_result.get("protected"):
+                detail += "; protected=" + ",".join(envelope_result["protected"])
+        all_pass &= check(
+            f"Change Envelope（{envelope_result['status']}）",
+            envelope_result["passed"],
+            detail,
+        )
+
+    # 6. 已捕获的 Preserve 特征基线必须复验；无基线项目保持兼容。
+    baseline = project_dir / "governance" / "characterization" / f"CB-{task_id}.yaml"
+    if baseline.exists():
+        from characterize import verify_baseline
+        baseline_result = verify_baseline(project_dir, task_id, baseline)
+        all_pass &= check(
+            f"Preserve 基线（{baseline_result['status']}）",
+            baseline_result["passed"],
+            "; ".join(baseline_result.get("errors", [])) or ",".join(baseline_result.get("changed", [])),
+        )
+
+    # 7. Verification Plan 一旦出现就必须正式授权并取得 PASS；无计划项目保持兼容。
+    verification = project_dir / "governance" / "verification" / f"Verification_Plan_{task_id}.yaml"
+    if verification.exists():
+        from verification_plan import check_plan
+        verification_result = check_plan(project_dir, task_id, verification)
+        details = list(verification_result.get("errors", []))
+        for obligation in verification_result.get("obligations", []):
+            details.extend(f"{obligation.get('id')}: {error}" for error in obligation.get("errors", []))
+        all_pass &= check(
+            f"Verification Plan（{verification_result['verdict']}）",
+            verification_result["verdict"] == "PASS",
+            "; ".join(details),
+        )
 
     return all_pass
 
@@ -374,19 +476,27 @@ def gate_bug(task_id, project_dir):
     else:
         all_pass &= check("证据包存在", False, "文件不存在")
 
-    # 2. 遥测 first_pass=0（被修正过）
+    # 2. Bug 修正遥测 first_pass=0；原任务遥测是历史事实，不得覆写。
     tel_file = gov / "telemetry" / "runs" / f"telemetry-{task_id}.json"
+    correction = None
+    for candidate in sorted((gov / "telemetry" / "runs").glob("telemetry-B-*.json")):
+        try:
+            data = json.loads(candidate.read_text())
+            if data.get("parent_task") == task_id and data.get("value", {}).get("first_pass_rate", {}).get("value") == 0:
+                correction = candidate
+                break
+        except Exception:
+            continue
+    legacy_corrected = False
     if tel_file.exists():
         try:
-            data = json.loads(tel_file.read_text())
-            first_pass = data.get("value", {}).get("first_pass_rate", {})
-            fp_value = first_pass.get("value", 1.0)
-            all_pass &= check(f"遥测 first_pass 已修正（{fp_value}）",
-                              fp_value == 0, "first_pass_rate 仍为 1.0 — 未修正")
+            legacy = json.loads(tel_file.read_text())
+            legacy_corrected = legacy.get("value", {}).get("first_pass_rate", {}).get("value") == 0
         except Exception:
-            all_pass &= check("遥测文件解析", False, "JSON 格式错误")
-    else:
-        all_pass &= check("遥测文件存在", False, "文件不存在")
+            pass
+    all_pass &= check("Bug 修正遥测已记录（first_pass=0）",
+                      correction is not None or legacy_corrected,
+                      "未找到关联该任务的 telemetry-B-XXX.json")
 
     # 3. 意图图谱含 bug 教训
     graph = gov / "Intent_Graph.md"
@@ -424,16 +534,17 @@ def main():
     print(f"\n{'='*50}")
     print(f"  Gate Check — {gate_name}")
     print(f"  任务: {args.task}  项目: {project_dir.name}")
+    print(f"  控制状态: {GATE_CONTROL_STATES[args.gate]}")
     print(f"{'='*50}\n")
 
     all_pass = gate_func(args.task, project_dir)
 
     print(f"\n{'─'*50}")
     if all_pass:
-        print(f"✅ {gate_name} 全部通过 — 可进入下一阶段")
+        print(f"✅ {gate_name} 全部通过 — 状态转换证据充分")
         sys.exit(0)
     else:
-        print(f"❌ {gate_name} 有未通过项 — 必须补齐后才能继续")
+        print(f"❌ {gate_name} 有未通过项 — 状态转换被阻断")
         sys.exit(1)
 
 

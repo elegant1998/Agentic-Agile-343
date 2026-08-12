@@ -275,17 +275,23 @@ def find_evidence_bundle(project_dir: Path, task_id: str) -> Path | None:
 def is_task_completed(project_dir: Path, task_id: str) -> bool:
     """判定任务是否已完成（用于豁免时效检查等场景）
 
-    完成标志：证据包存在且裁决区包含 APPROVED/SIGNED 标记。
-    证据包缺失时回退为 False（未完成）。
+    SIGNED 只表示 IO 已授权执行，不能作为完成态；契约也不会从
+    SIGNED 迁移为 COMPLETED。完成必须由 Evidence 的技术裁决或明确
+    最终裁决派生，避免 Evidence 中引用 Contract (SIGNED) 被误判。
     """
     eb = find_evidence_bundle(project_dir, task_id)
     if eb is None:
         return False
     try:
-        text = eb.read_text()
+        text = eb.read_text(encoding="utf-8", errors="ignore")
     except OSError:
         return False
-    return bool(re.search(r"APPROVED|SIGNED", text))
+    verdict_rows = (
+        r"^\s*\|?\s*(?:技术裁决|Technical\s+Verdict|technical_verdict)\s*\|\s*(?:PASS|APPROVED)\b",
+        r"^\s*\|?\s*(?:最终裁决|Final\s+Verdict|final_verdict)\s*\|\s*(?:PASS|APPROVED)\b",
+        r"^\s*\|?\s*(?:状态|Status|status)\s*\|\s*(?:APPROVED|COMPLETED)\b",
+    )
+    return any(re.search(pattern, text, re.IGNORECASE | re.MULTILINE) for pattern in verdict_rows)
 
 
 # ─── 图谱 / 约束定位 ───────────────────────────────────────

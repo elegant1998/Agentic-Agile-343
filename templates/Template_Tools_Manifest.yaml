@@ -13,6 +13,12 @@ version: "1.0"
 # ─── 工具分类定义 ──────────────────────────────────────────
 
 tool_categories:
+  context_provider:
+    name: "上下文地图 Provider"
+    description: "只读消费显式授权的 Document Map / Code Map 结构化结果"
+    risk_level: MEDIUM
+    requires_approval: false
+
   file_ops:
     name: "文件操作"
     description: "读取、写入、编辑项目文件"
@@ -58,6 +64,24 @@ tool_categories:
 # ─── 工具白名单 ────────────────────────────────────────────
 
 tools:
+  - id: CONTEXT_DOCUMENT_MAP
+    name: "Document Map（可选）"
+    category: context_provider
+    description: "优先使用 IWE 查询需求、规则、AC、ADR 与历史决策；缺失时回退内建 Recon"
+    access_modes: [agent_exposed, artifact_available, cli_available]
+    required: false
+    auto_install: false
+    default_read_only: true
+
+  - id: CONTEXT_CODE_MAP
+    name: "Code Map（可选）"
+    category: context_provider
+    description: "优先使用 codebase-memory-mcp 查询符号、调用、路由、测试和影响候选"
+    access_modes: [agent_exposed, artifact_available]
+    required: false
+    auto_install: false
+    default_read_only: true
+
   # ── 文件操作 ──
   - id: FILE_READ
     name: "读取文件"
@@ -189,7 +213,7 @@ task_tool_matrix:
   implement:
     description: "代码实现"
     required_tools: [FILE_READ, FILE_WRITE, FILE_EDIT, SHELL_TEST, TEST_RUN, TEST_COVERAGE]
-    optional_tools: [DB_MIGRATE, DB_QUERY, SHELL_GIT]
+    optional_tools: [DB_MIGRATE, DB_QUERY, SHELL_GIT, CONTEXT_DOCUMENT_MAP, CONTEXT_CODE_MAP]
 
   test:
     description: "测试验证"

@@ -5,3 +5,6 @@
 # Python runtime caches.
 __pycache__/
 *.py[cod]
+
+# macOS metadata.
+.DS_Store
