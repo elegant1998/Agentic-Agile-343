@@ -3,7 +3,7 @@ name: agentic-agile-343
 description: "Agentic-Agile-343，让 AI 研发治理进可攻退可守。用户说既有项目先看看、风险评估或初始化治理、门禁误报、分析文件影响范围、本次只允许修改某些文件、没有测试先固定现有行为、修改已有功能、报告 Bug/缺陷/回归并要求修复、设计多层验证、生成证据包并完成任务，或准备发布、生成发布清单、检查制品和证据是否一致、记录已发布/回滚时使用。提供 3-4-3、Recon、安全变更、Verification Plan、Evidence 遥测收口、Release Manifest、TDD、证据与遥测闭环。Use for existing-project governance, safe changes, bug/regression repair, risk-driven verification, evidence-to-telemetry finalization, proof-carrying release readiness, artifact/evidence binding, and release/rollback fact recording."
 metadata:
   display_name: "Agentic Agile 343"
-  version: "1.39.1"
+  version: "1.42.0"
   author: "王立杰-无敌哥"
   created: "2025-07-20"
 ---
@@ -76,7 +76,7 @@ metadata:
 | **风险评估** | `scripts/assess_risk.py` | **按事实推荐 explore / delivery / high-risk / legacy / multi-module 治理模式** |
 | **风险驱动入口** | `scripts/init_governance.py` | **识别项目类型、执行 Recon、评估七域风险并生成最小治理计划；默认 dry-run** |
 | **门禁维护通道** | `scripts/maintenance.py` | **以 M-XXX 管理低风险机械缺陷；Unknown 或规则语义变化自动升级为契约** |
-| 上下文裁剪引擎 | `scripts/crop_context.py` | 三层注入模型，从图谱裁剪出给 AS 的精简 prompt |
+| 上下文裁剪引擎 | `scripts/crop_context.py` | 三层注入模型，自动注入有界 L0-L3 Document/Code Map 上下文 |
 | **Harness 引擎** | `scripts/harness.py` | **约束执行引擎（含 7 个 NFR 验证器，支持插件扩展）** |
 | 自洽性检查 | `scripts/self_consistency_check.py` | LOOP-1: 校验产出物是否与契约一致 |
 | 反思+反哺 | `scripts/reflect.py` | LOOP-2/3: 生成反思日志 + 反哺意图图谱 |
@@ -123,6 +123,14 @@ metadata:
 > **双地图渐进增强 Recon（v1.37.0）**：IWE 推荐作为 Document Map，codebase-memory-mcp 推荐作为 Code Map，343 用统一 ID 维护 Trace Link。Agent-native MCP、显式 JSON/YAML Map 制品和内建扫描是三种兼容入口；没有外部工具时 L0 继续完整工作并给出非阻断建议。CLI 不伪装发现宿主 MCP，不自动安装、配置、联网或回写地图。外部静态/语义关系默认保持 Candidate，过期、冲突、越界或不兼容数据进入 Unknown 并 fail closed。详见 **[references/task_recon.md](references/task_recon.md#document-map--code-map-渐进增强v1370)**。
 
 > **项目级地图默认增强（v1.38.0）**：项目 Recon 默认发现 `governance/recon/*_map_artifact.json`；工具可用但项目地图缺失时，以显式项目根初始化 IWE `.iwe` 并调用 codebase-memory-mcp `index_repository --repo-path <PROJECT> --persistence true`。双地图归一化后自动生成 Trace Link；无充分证据的关系保持 Candidate/Unknown。可用 `--no-auto-context` 关闭初始化；工具失败继续回退 L0。该能力只允许项目内持久化，不自动安装、联网、修改全局 MCP 配置或扩大 Change Envelope。
+
+> **原生地图适配与 Prompt 注入（v1.40.0）**：Recon 可将 IWE 与 codebase-memory-mcp 的结构化结果原子归一化为标准 Map 工件，`crop_context.py` 默认把有界的 Document Map、Code Map、Candidate Trace Link、Provider 状态和 Unknown 注入 Agent Prompt。L0/L1/L2/L3 均可工作；`--no-map-context` 可关闭注入。团队模式使用 `recon.py --map-mode team`：匹配 revision 的 `authority: ci` 快照只消费不覆盖，缺失时仅生成 `governance/recon/.local/` 本地回退。地图异常必须披露影响和人工恢复建议，地图上下文不构成执行授权或验证证据。
+
+> **Evidence 收口性能治理（v1.40.1）**：可信 Verification Run Context 会作为 collector 的唯一测试快照，禁止 `collect_telemetry.py` 再通过 `harness tests` 隐性重跑；正式验证事件后的第二阶段只执行 metrics/dashboard refresh。收口启动前预检写权限，并输出 preflight、collector、formal_event、metrics_refresh 阶段及耗时。调度披露 external/internal/total execution 与 reuse count，context 失效时仍真实执行一次完整测试。
+
+> **治理运行时统一计划（v1.41.0）**：Gate、Harness、Telemetry 共用唯一 `TestExecutionPlan`，Verification Run Context 绑定实际 argv、源码摘要与校验和；`nfr:test_run` 收到可信 context 时只验证快照，不再重跑测试。单次工作流通过 `ProjectSnapshot` 复用 revision、文件清单和源码摘要；Harness NFR 共用源码清单与内容缓存，Crop Context 只构建一次地图并在进程内发现代码上下文。调度输出 test/scan/digest/map/harness/collector/persist 的执行或复用事实，失效数据仍 fail closed。
+
+> **规模化 Map-first 与增量治理（v1.42.0）**：Provider 构建和查询具备条目、Token、字节与超时预算，禁止 IWE `--limit 0` 和无界 Code Map 图查询。Task Recon 优先只确认地图返回的有界候选；无可用地图时至多执行一次有界 `rg` 回退，并排除 `.iwe`、`.codebase-memory`、依赖与构建缓存。执行事件使用可从 JSONL 重建的 SQLite 侧索引，项目遥测把聚合原始事实固化进稳定 run 摘要；Evidence finalize 只执行一次最终 Telemetry/Dashboard 持久化。
 
 > **正式验证事实链（v1.39.0）**：Evidence/Telemetry 收口后由工作流代码追加 `formal_verification` 事件，结果严格为 `VERIFIED`、`CONDITIONAL` 或 `BLOCKED`。首次 `CONDITIONAL` 后续转 `VERIFIED` 不计首次成功；无正式事件时 `first_pass_rate` 为 UNKNOWN。`must_total=0` 输出 `NOT_APPLICABLE/N/A`，不显示虚假的 100%。
 
@@ -238,7 +246,7 @@ SCOPE-V 是六个持续控制面，而不是一次性线性阶段：`S / C / O /
 
 ### 5. 上下文工程：三层注入模型
 
-L1 意图图谱（OA 会话级）→ L2 全局约束（共享）→ L2+ AI 编码规范（AS 任务级）→ L3 任务切片（收敛）。`crop_context.py` 自动裁剪，支持隔离验证和 watch 模式。
+L1 意图图谱（OA 会话级）→ L2 全局约束（共享）→ L2+ AI 编码规范（AS 任务级）→ L3 任务切片（收敛）→ Map Context（L0-L3 渐进增强）。`crop_context.py` 自动裁剪并注入双地图或单地图上下文，支持隔离验证、预算限制和 watch 模式。
 
 > 📖 三层注入模型图、裁剪工作流、YAML 精简契约格式详见 **[references/context_engineering.md](references/context_engineering.md)**。
 

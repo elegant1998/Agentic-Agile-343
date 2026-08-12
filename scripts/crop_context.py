@@ -256,6 +256,7 @@ def load_loop_memory(project_dir: Path, task_id: str) -> str | None:
 
 sys.path.insert(0, str(Path(__file__).parent))
 from gov_common import find_contract as _gc_find_contract, parse_contract as _gc_parse_contract
+from context_providers import build_context
 
 
 def _to_bullet_list(text) -> list:
@@ -298,16 +299,12 @@ def load_yaml_contract(project_dir: Path, task_id: str) -> dict:
 
 
 def load_code_context(project_dir: Path) -> dict:
-    """调用 discover_context.py 获取代码上下文"""
-    import subprocess
-    result = subprocess.run(
-        [sys.executable, str(project_dir / "scripts" / "discover_context.py"),
-         "--project-dir", str(project_dir), "--format", "json"],
-        capture_output=True, text=True
-    )
-    if result.returncode == 0:
-        return json.loads(result.stdout)
-    return {}
+    """进程内获取代码上下文，避免重复 Python 启动。"""
+    try:
+        from discover_context import discover
+        return discover(project_dir)
+    except (ImportError, OSError, ValueError):
+        return {}
 
 
 def format_code_context(code_ctx: dict, target_domain: str = None) -> str:
@@ -336,11 +333,48 @@ def format_code_context(code_ctx: dict, target_domain: str = None) -> str:
     return '\n'.join(lines)
 
 
-def crop(project_dir: Path, task_id: str, target_domain: str = None) -> str:
+def _map_item_text(item: dict) -> str:
+    label = item.get("title") or item.get("name") or item.get("path") or ""
+    return f"{item.get('id', '?')}" + (f" — {label}" if label else "")
+
+
+def format_map_context(map_context: dict) -> str:
+    lines = ["## 项目知识上下文（渐进增强）", f"- Context Level: {map_context['level']}"]
+    providers = map_context.get("providers", [])
+    lines.append("- Providers: " + (", ".join(f"{p['name']}={p['status']}" for p in providers) or "unavailable"))
+    for title, key in (("需求上下文", "documents"), ("代码地图", "code")):
+        items = map_context.get(key, [])
+        if items:
+            lines.append(f"\n### {title}")
+            lines.extend(f"- [{item.get('classification', 'CANDIDATE')}] {_map_item_text(item)}" for item in items)
+    links = map_context.get("trace_links", [])
+    if links:
+        lines.append("\n### Trace Links")
+        for link in links:
+            tests = ", ".join(link.get("tests", []))
+            suffix = f" -> {tests}" if tests else ""
+            lines.append(f"- [{link.get('classification', 'CANDIDATE')}] {link['requirement_id']} -> {link['symbol_id']}{suffix}")
+    if map_context.get("unknown"):
+        lines.append("\n### Unknown / 降级")
+        lines.extend(f"- {item}" for item in map_context["unknown"])
+    if map_context.get("recovery_actions"):
+        lines.append("\n### 建议操作")
+        for action in map_context["recovery_actions"]:
+            lines.append(f"- {action['reason']}: `{action['command']}`（不自动执行）")
+    if map_context["level"] == "L0":
+        lines.append("- Fallback: 使用契约、约束和内建代码扫描")
+    lines.append(f"- Authority: {map_context['authority']}")
+    return "\n".join(lines)
+
+
+def crop(project_dir: Path, task_id: str, target_domain: str = None, map_max_items: int = 10,
+         include_map_context: bool = True, map_context: dict | None = None) -> str:
     """裁剪：组装 L2 + L3 + Ctx → 精简 prompt"""
     l2 = load_global_constraints(project_dir)
     l3 = load_yaml_contract(project_dir, task_id)
     ctx = load_code_context(project_dir)
+    if map_context is None:
+        map_context = build_context(project_dir, max_items=map_max_items, include_recommendations=False)
 
     parts = []
 
@@ -405,6 +439,9 @@ def crop(project_dir: Path, task_id: str, target_domain: str = None) -> str:
     # 代码上下文
     parts.append(f"\n## 代码上下文（自动发现）")
     parts.append(format_code_context(ctx, target_domain))
+
+    if include_map_context:
+        parts.append("\n" + format_map_context(map_context))
 
     # 关键约束提示（按项目类型动态调整）
     parts.append(f"\n## ⚠️ 关键约束")
@@ -617,6 +654,8 @@ def main():
                         help="Watch 模式检查间隔（秒）")
     parser.add_argument("--enforce-budget", action="store_true",
                         help="Token 预算硬拦��：超预算时拒绝裁剪（退出码 1），强制 OA 拆分任务")
+    parser.add_argument("--map-max-items", type=int, default=10, help="每类地图上下文最多注入的条目数")
+    parser.add_argument("--no-map-context", action="store_true", help="关闭地图上下文注入，不删除地图")
     args = parser.parse_args()
 
     project_dir = Path(args.project_dir).resolve()
@@ -626,7 +665,9 @@ def main():
         watch_mode(project_dir, args.task, args.domain, args.watch_interval)
         return
 
-    prompt = crop(project_dir, args.task, args.domain)
+    map_context = build_context(project_dir, max_items=args.map_max_items, include_recommendations=False)
+    prompt = crop(project_dir, args.task, args.domain, args.map_max_items,
+                  not args.no_map_context, map_context=map_context)
 
     # Token 预算硬拦截（Karpathy 规则6 — 在裁剪阶段就拦截，不等到 AS 执行时才发现）
     if args.enforce_budget:
@@ -661,10 +702,13 @@ def main():
 
     # 常规输出
     if args.output:
-        Path(args.output).write_text(prompt)
+        rendered = json.dumps({"prompt": prompt, "map_context": map_context}, ensure_ascii=False, indent=2) if args.format == "json" else prompt
+        Path(args.output).write_text(rendered, encoding="utf-8")
         print(f"裁剪后的 prompt 已写入: {args.output}", file=sys.stderr)
-
-    print(prompt)
+    if args.format == "json":
+        print(json.dumps({"prompt": prompt, "map_context": map_context}, ensure_ascii=False, indent=2))
+    else:
+        print(prompt)
 
 
 if __name__ == "__main__":

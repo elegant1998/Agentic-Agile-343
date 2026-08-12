@@ -10,3 +10,7 @@ __pycache__/
 .DS_Store
 assets/dashboard.html
 assets/dashboard.html
+
+# Team-mode local map fallback; CI-authoritative snapshots use the parent directory.
+governance/recon/.local/
+docs/关于codebase-memory-mcp和iwe双地图的构建与git 管理规则.md

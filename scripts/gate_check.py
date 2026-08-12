@@ -22,6 +22,7 @@ from pathlib import Path
 from datetime import datetime
 
 from command_runner import run_command
+from runtime_context import resolve_test_plan
 
 
 # SCOPE-V 的五道机械门检查控制状态转换，而不是增加线性流程阶段。
@@ -65,47 +66,41 @@ def check(label, condition, detail=""):
 
 
 def run_python_tests(project_dir, timeout=120):
-    """运行可用的 Python 测试框架并返回结构化结果。
+    """执行共享测试计划并返回结构化结果。
 
-    优先使用项目环境中已安装的 pytest；否则使用标准库 unittest。
+    函数名为兼容既有调用保留；实际支持共享计划中的跨语言 runner。
     返回: {framework, returncode, total, passed, failed, output}
     """
-    probe_rc, _, _ = run([sys.executable, "-c", "import pytest"], cwd=str(project_dir), timeout=10)
-    if probe_rc == 0:
-        framework = "pytest"
-        rc, out, err = run([sys.executable, "-m", "pytest", "-q"], cwd=str(project_dir), timeout=timeout)
-        output = "\n".join(part for part in (out, err) if part)
+    plan = resolve_test_plan(project_dir, timeout=timeout)
+    framework = plan.get("runner") or "none"
+    argv = plan.get("argv") or []
+    rc, out, err = run(argv, cwd=str(project_dir), timeout=timeout)
+    output = "\n".join(part for part in (out, err) if part)
+    if framework == "pytest":
         passed = sum(int(value) for value in re.findall(r"(\d+) passed", output))
         failed = sum(
             int(value)
             for value in re.findall(r"(\d+) (?:failed|error(?:s)?)", output)
         )
         total = passed + failed
-    else:
-        framework = "unittest"
-        unittest_cmd = [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"]
-        if (Path(project_dir) / "tests" / "__init__.py").exists():
-            unittest_cmd = [
-                sys.executable,
-                "-m",
-                "unittest",
-                "discover",
-                "-s",
-                "tests",
-                "-t",
-                ".",
-                "-v",
-            ]
-        rc, out, err = run(
-            unittest_cmd,
-            cwd=str(project_dir),
-            timeout=timeout,
-        )
-        output = "\n".join(part for part in (out, err) if part)
+    elif framework == "unittest":
         match = re.search(r"Ran (\d+) tests?", output)
         total = int(match.group(1)) if match else 0
         failed = total if rc != 0 else 0
         passed = total if rc == 0 else 0
+    elif framework in {"vitest", "jest"}:
+        try:
+            data = json.loads(out)
+        except json.JSONDecodeError:
+            data = {}
+        total = int(data.get("numTotalTests", 0) or 0)
+        passed = int(data.get("numPassedTests", 0) or 0)
+        failed = int(data.get("numFailedTests", max(0, total - passed)) or 0)
+    else:
+        counts = [int(value) for value in re.findall(r"(?:tests?|passed)[:= ]+(\d+)", output, re.IGNORECASE)]
+        total = max(counts, default=0)
+        passed = total if rc == 0 else 0
+        failed = max(0, total - passed) if total else (1 if rc != 0 else 0)
 
     return {
         "framework": framework,
@@ -114,6 +109,7 @@ def run_python_tests(project_dir, timeout=120):
         "passed": passed,
         "failed": failed,
         "output": output,
+        "argv": argv,
     }
 
 
@@ -303,42 +299,25 @@ def gate_prove(task_id, project_dir):
     pkg = project_dir / "package.json"
     test_total = 0
     test_passed = 0
-    if pkg.exists():
-        rc, out, err = run(
-            ["npx", "vitest", "run", "--reporter=json"],
-            cwd=str(project_dir),
-            timeout=120,
-        )
-        try:
-            data = json.loads(out)
-            test_total = data.get("numTotalTests", 0)
-            test_passed = data.get("numPassedTests", 0)
-            test_failed = data.get("numFailedTests", 0)
-            all_pass &= check(f"测试全部通过（{test_passed}/{test_total}）",
-                              test_failed == 0 and test_passed > 0,
-                              f"{test_failed} 个测试失败")
-        except json.JSONDecodeError:
-            all_pass &= check("测试运行", False, "无法解析 vitest 输出")
-    else:
-        result = run_python_tests(project_dir, timeout=120)
-        test_total = result["total"]
-        test_passed = result["passed"]
-        all_pass &= check(
-            f"测试全部通过（{test_passed}/{test_total}，{result['framework']}）",
-            result["returncode"] == 0 and test_passed > 0,
-            "Python 测试存在失败或未发现测试",
-        )
-        try:
-            sys.path.insert(0, str(Path(__file__).resolve().parent))
-            from telemetry_workflow import record_verification_context
-            record_verification_context(project_dir, task_id, {
-                "total": result["total"], "passed": result["passed"],
-                "failed": result.get("failed", 0),
-                "status": "PASS" if result["returncode"] == 0 and result["total"] else "FAIL",
-                "runner": result["framework"],
-            })
-        except (OSError, ValueError, ImportError):
-            pass
+    result = run_python_tests(project_dir, timeout=120)
+    test_total = result["total"]
+    test_passed = result["passed"]
+    all_pass &= check(
+        f"测试全部通过（{test_passed}/{test_total}，{result['framework']}）",
+        result["returncode"] == 0 and test_passed > 0,
+        "测试存在失败或未发现测试",
+    )
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from telemetry_workflow import record_verification_context
+        record_verification_context(project_dir, task_id, {
+            "total": result["total"], "passed": result["passed"],
+            "failed": result.get("failed", 0),
+            "status": "PASS" if result["returncode"] == 0 and result["total"] else "FAIL",
+            "runner": result["framework"],
+        }, command=result.get("argv"))
+    except (OSError, ValueError, ImportError):
+        pass
 
     # 2. test-total > 0
     all_pass &= check(f"test-total > 0（当前 {test_total}）", test_total > 0,

@@ -15,6 +15,8 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +36,29 @@ CONSTRAINT_RESULT_PATTERN = re.compile(
 
 class FinalizeError(RuntimeError):
     """Evidence cannot be finalized with trustworthy telemetry."""
+
+
+def _path_is_writable(path: Path) -> bool:
+    target = path if path.is_dir() else path.parent
+    probe = None
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        fd, probe = tempfile.mkstemp(prefix=".write-probe-", dir=target)
+        import os
+        os.close(fd)
+        Path(probe).unlink(missing_ok=True)
+        return True
+    except OSError:
+        if probe:
+            Path(probe).unlink(missing_ok=True)
+        return False
+
+
+def _progress(stage: str, status: str, started: float | None = None) -> None:
+    event = {"stage": stage, "status": status}
+    if started is not None:
+        event["elapsed_ms"] = int((time.monotonic() - started) * 1000)
+    print(json.dumps(event, ensure_ascii=False), file=sys.stderr, flush=True)
 
 
 def _validate_task_id(raw: str) -> str:
@@ -131,7 +156,7 @@ def _verify_outputs(project: Path, task_id: str, before: dict[Path, tuple[int, i
     }
 
 
-def finalize_evidence(project_dir: Path | str, task_id: str, timeout_seconds: int = 1800) -> dict[str, Any]:
+def finalize_evidence(project_dir: Path | str, task_id: str, timeout_seconds: int = 300) -> dict[str, Any]:
     project = Path(project_dir).resolve()
     task_id = _validate_task_id(task_id)
     if not project.is_dir():
@@ -146,6 +171,14 @@ def finalize_evidence(project_dir: Path | str, task_id: str, timeout_seconds: in
     evidence_digest = _assert_evidence_ready(evidence, task_id)
 
     governance = project / "governance"
+    preflight_started = time.monotonic()
+    _progress("preflight", "started")
+    targets = [governance, governance / "telemetry", governance / "telemetry/runs",
+               governance / "telemetry/verification-runs"]
+    blocked = [str(path) for path in targets if not _path_is_writable(path)]
+    if blocked:
+        raise FinalizeError("WRITE_PERMISSION_REQUIRED: " + ", ".join(blocked))
+    _progress("preflight", "completed", preflight_started)
     outputs = [
         governance / "telemetry" / "runs" / f"telemetry-{task_id}.json",
         governance / "telemetry.json",
@@ -156,10 +189,13 @@ def finalize_evidence(project_dir: Path | str, task_id: str, timeout_seconds: in
     collector = Path(__file__).resolve().parent / "telemetry_workflow.py"
     if not collector.is_file():
         raise FinalizeError(f"Python 遥测编排器不存在: {collector}")
-    command = [sys.executable, str(collector), task_id, str(governance)]
+    command = [sys.executable, str(collector), task_id, str(governance), "--timeout", str(timeout_seconds)]
+    prepare_command = command + ["--prepare-only"]
+    collector_started = time.monotonic()
+    _progress("verification_prepare", "started")
     try:
         completed = subprocess.run(
-            command,
+            prepare_command,
             cwd=str(project),
             capture_output=True,
             text=True,
@@ -167,33 +203,38 @@ def finalize_evidence(project_dir: Path | str, task_id: str, timeout_seconds: in
             shell=False,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
-        raise FinalizeError(f"telemetry workflow 执行失败: {type(exc).__name__}: {exc}") from exc
+        raise FinalizeError(f"verification prepare 执行失败: {type(exc).__name__}: {exc}") from exc
     if completed.returncode != 0:
         detail = (completed.stderr or completed.stdout or "无输出").strip()[-2000:]
-        raise FinalizeError(f"telemetry workflow 退出码 {completed.returncode}: {detail}")
+        raise FinalizeError(f"verification prepare 退出码 {completed.returncode}: {detail}")
+    _progress("verification_prepare", "completed", collector_started)
 
-    artifacts = _verify_outputs(project, task_id, before)
     if _sha256(evidence) != evidence_digest:
         raise FinalizeError("Evidence Bundle 在遥测收口过程中被修改；拒绝完成")
     result, conditions = formal_result_from_evidence(evidence)
+    expected_run = governance / "telemetry" / "runs" / f"telemetry-{task_id}.json"
     append_formal_verification(
         project, task_id, result=result, prove_status="PASS",
         evidence_status="READY_FOR_HITL" if result == "CONDITIONAL" else "PASS",
         telemetry_status="FINALIZED", source="evidence_finalize",
-        evidence=[_relative(evidence, project), _relative(Path(artifacts["contract_telemetry"]), project)],
+        evidence=[_relative(evidence, project), _relative(expected_run, project)],
         conditions=conditions,
     )
-    # Recompute once after the event exists so P0 metrics consume the new fact.
+    _progress("formal_event", "completed")
+    persist_started = time.monotonic()
+    _progress("final_persist", "started")
     try:
         completed = subprocess.run(
             command, cwd=str(project), capture_output=True, text=True,
             timeout=timeout_seconds, shell=False,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
-        raise FinalizeError(f"formal verification telemetry refresh failed: {type(exc).__name__}: {exc}") from exc
+        raise FinalizeError(f"final telemetry persistence failed: {type(exc).__name__}: {exc}") from exc
     if completed.returncode != 0:
         detail = (completed.stderr or completed.stdout or "无输出").strip()[-2000:]
-        raise FinalizeError(f"formal verification telemetry refresh exited {completed.returncode}: {detail}")
+        raise FinalizeError(f"final telemetry persistence exited {completed.returncode}: {detail}")
+    _progress("final_persist", "completed", persist_started)
+    artifacts = _verify_outputs(project, task_id, before)
     return {
         "status": "EVIDENCE_FINALIZED_WITH_TELEMETRY",
         "task_id": task_id,
@@ -211,7 +252,7 @@ def main() -> int:
     finalize = subparsers.add_parser("finalize", help="校验证据并自动完成遥测收口")
     finalize.add_argument("--task", required=True)
     finalize.add_argument("--project-dir", default=".")
-    finalize.add_argument("--timeout", type=int, default=1800)
+    finalize.add_argument("--timeout", type=int, default=300)
     args = parser.parse_args()
     try:
         result = finalize_evidence(args.project_dir, args.task, args.timeout)

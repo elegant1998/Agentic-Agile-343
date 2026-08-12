@@ -2,14 +2,45 @@
 
 > 🌐 English version: [RELEASE_NOTES.en.md](RELEASE_NOTES.en.md)
 
-# Agentic Agile 3-4-3 治理架构 · 开源版 v1.39.1
+# Agentic Agile 3-4-3 治理架构 · 开源版 v1.42.0
 
 > **先校准、再打怪。** 这是完整、可运行的 Agentic AI 研发治理框架——全部开源，无保留。让 AI 研发治理，进可攻退可守。
 
-- **版本**：`1.39.1`
+- **版本**：`1.42.0`
 - **发布日期**：2026-08-12
 - **许可证**：代码/模板 MIT · 白皮书 CC BY 4.0
 - **作者**：王立杰（无敌哥），AI 治理架构师
+
+## v1.42.0：Map-first Recon 与长期治理数据增量化
+
+- IWE 与 codebase-memory-mcp 查询增加条目、Token、字节和阶段超时预算，禁止完整地图导出。
+- Task Recon 优先读取地图候选；无地图时只执行一次有界 `rg` 回退，并排除 Provider 数据库与缓存。
+- 地图 shared/local、fresh/stale/damaged 状态具备明确消费、重建、降级和恢复建议。
+- JSONL 事件账本增加可重建 SQLite 侧索引；项目遥测把聚合事实写入稳定 run 摘要，不再反复打开历史 run 文件。
+- Evidence finalize 改为 prepare 后一次最终持久化，不再生成中间项目 Dashboard。
+- 12,000 文件 Map-first、10,000 事件和 10,000 run 摘要规模回归纳入自动化预算。
+
+## v1.41.0：治理运行时去重与共享项目快照
+
+- Gate、Harness、Telemetry 统一消费 `TestExecutionPlan`，Verification Context 记录实际 argv 并校验完整性。
+- `nfr:test_run` 复用可信 Verification Run Context，不再经 Harness 隐性重跑测试。
+- 新增工作流级 `ProjectSnapshot`，复用文件清单、Git revision 和源码摘要。
+- Harness 多项 NFR 共用源码清单与内容缓存；12,000 文件五项扫描基准由约 2.96 秒降至约 0.59 秒。
+- Crop Context 只构建一次地图上下文，并在进程内调用代码发现器；当前项目基准由约 0.81 秒降至约 0.04 秒。
+
+## v1.40.1：Evidence 收口性能治理
+
+- 消除 collector 内部 `harness tests` 隐性重复执行，可信 Verification Run Context 成为唯一测试快照。
+- formal_verification 后改为 metrics-only refresh，不再执行完整遥测工作流。
+- 增加写权限预检、阶段进度和 elapsed_ms，避免失败后整条重跑与长时间静默。
+- 调度披露外层、内部及总测试执行/复用次数。
+
+## v1.40.0：原生双地图适配与 Agent 上下文自动注入
+
+- Recon 将 IWE 和 codebase-memory-mcp 的结构化查询结果归一化为确定性标准地图工件。
+- `crop_context.py` 默认注入有界的 L0-L3 Document Map、Code Map、Candidate Trace Link 与 Unknown。
+- 团队模式优先消费 `authority: ci` 快照，本地缺图时仅生成 `.local` 回退，不覆盖共享地图。
+- Provider 过期、损坏或查询失败时披露影响与人工恢复建议，继续安全降级。
 - **官网**：<http://agentic.iloveagile.me/about> · 微信 `iloveagile`
 
 ---

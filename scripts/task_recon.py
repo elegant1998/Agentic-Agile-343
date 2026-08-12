@@ -12,13 +12,14 @@ import ast
 import json
 import re
 import subprocess
+import shutil
 from pathlib import Path
 from typing import Iterable
 
 from context_providers import build_context
 
 
-IGNORED_PARTS = {".git", ".venv", "venv", "node_modules", "__pycache__", "dist", "build"}
+IGNORED_PARTS = {".git", ".venv", "venv", "node_modules", "__pycache__", "dist", "build", ".iwe", ".codebase-memory"}
 LANGUAGES = {
     ".py": "Python", ".js": "JavaScript", ".jsx": "JavaScript",
     ".ts": "TypeScript", ".tsx": "TypeScript", ".c": "C", ".h": "C/C++",
@@ -201,6 +202,57 @@ def _git_untracked(project: Path) -> list[str]:
     return [line[3:] for line in result.stdout.splitlines() if line.startswith("?? ")]
 
 
+def _map_candidate_paths(project: Path, context: dict, search_tokens: set[str]) -> list[Path]:
+    candidates = []
+    lowered = {token.lower() for token in search_tokens}
+    for item in context.get("code", []):
+        searchable = " ".join(str(item.get(key, "")) for key in ("id", "name", "qualified_name", "title")).lower()
+        if lowered and not any(token in searchable for token in lowered):
+            continue
+        values = [item.get("path"), item.get("file")]
+        values.extend(item.get("tested_by", []) if isinstance(item.get("tested_by"), list) else [])
+        for value in values:
+            if not isinstance(value, str):
+                continue
+            path = (project / value).resolve()
+            try:
+                path.relative_to(project)
+            except ValueError:
+                continue
+            if path.is_file() and path.suffix.lower() in LANGUAGES:
+                candidates.append(path)
+    return list(dict.fromkeys(candidates))
+
+
+def _rg_candidate_paths(project: Path, search_tokens: set[str], limit: int = 500) -> list[Path]:
+    executable = shutil.which("rg")
+    if not executable or not search_tokens:
+        return []
+    argv = [executable, "-l", "-i", "--hidden"]
+    for ignored in sorted(IGNORED_PARTS):
+        argv.extend(["--glob", f"!{ignored}/**"])
+    for suffix in sorted(LANGUAGES):
+        argv.extend(["--glob", f"*{suffix}"])
+    for token in sorted(search_tokens):
+        argv.extend(["-e", re.escape(token)])
+    argv.append(".")
+    try:
+        result = subprocess.run(argv, cwd=project, capture_output=True, text=True,
+                                check=False, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    paths = []
+    for raw in result.stdout.splitlines()[:limit]:
+        path = (project / raw).resolve()
+        try:
+            path.relative_to(project)
+        except ValueError:
+            continue
+        if path.is_file():
+            paths.append(path)
+    return list(dict.fromkeys(paths))
+
+
 def scan_task(
     project_dir: Path | str,
     task_id: str,
@@ -214,7 +266,6 @@ def scan_task(
     if not project.is_dir():
         raise ValueError(f"project directory does not exist: {project}")
     target_paths = _validate_targets(project, targets)
-    all_files = _files(project)
     target_set = set(target_paths)
     languages: dict[str, str] = {}
     declarations: list[dict] = []
@@ -232,8 +283,24 @@ def scan_task(
         unknown.extend(gaps)
         search_tokens.update(_symbols(target, text, language))
 
+    context = build_context(
+        project, provider_inputs, agent_providers,
+        context_max_items if context_max_items is not None else 100,
+        context_recommendations,
+    )
+    candidate_files = _map_candidate_paths(project, context, search_tokens)
+    if candidate_files:
+        strategy = "map_first"
+    else:
+        candidate_files = _rg_candidate_paths(project, search_tokens)
+        if candidate_files:
+            strategy = "rg_fallback"
+        else:
+            candidate_files = _files(project)
+            strategy = "builtin_scan_fallback"
+
     candidates: dict[tuple[str, str], dict] = {}
-    for path in all_files:
+    for path in candidate_files:
         if path in target_set or path.suffix.lower() not in LANGUAGES:
             continue
         relative = _relative(project, path)
@@ -259,7 +326,6 @@ def scan_task(
     target_rel = [_relative(project, path) for path in target_paths]
     if not unknown:
         unknown.append("Runtime dispatch and behavior remain unverified; static Recon is not execution evidence")
-    context = build_context(project, provider_inputs, agent_providers, context_max_items, context_recommendations)
     return {
         "task": {"id": task_id, "project": str(project), "targets": target_rel},
         "facts": {
@@ -272,6 +338,11 @@ def scan_task(
         "preserve": sorted(set(public_entries + untracked)),
         "unknown": unknown,
         "context": context,
+        "discovery": {
+            "strategy": strategy,
+            "candidate_file_count": len(candidate_files),
+            "search_token_count": len(search_tokens),
+        },
         "suggested_change_envelope": {
             "status": "DRAFT_NOT_AUTHORIZED",
             "allowed": target_rel,

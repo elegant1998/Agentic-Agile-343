@@ -1,4 +1,4 @@
-# Agentic Agile 3-4-3 治理架构 · 开源版 v1.39.1
+# Agentic Agile 3-4-3 治理架构 · 开源版 v1.42.0
 
 > **让AI交付可治理、可追溯、可验证。** 这是一套 Agentic AI 研发的**完整、可运行治理框架**——从意图契约到证据闭环、从约束门禁到遥测仪表板，全部开源，开箱即用。让 AI 研发治理，进可攻退可守。
 
@@ -26,6 +26,7 @@
 - **3 大自治机制**：意图注入（对话到契约门）、高频对抗自净化闭环、人类异常裁决（HITL + 证据包验收）。
 - **SCOPE-V 六个持续控制面**：`S / C / O / P⇄E / V`；Prove 与 Evolve 构成快内环，`V → Telemetry → S/C/O` 构成慢反馈外环。
 - **三大自治机制横切运行**：上下文自治、执行自治、进化自治横跨控制面，不与某一个阶段机械绑定。
+- **大仓库与长期历史可扩展**：Map-first Recon 使用有界 Provider 查询；无地图时单次有界回退，事件与项目遥测使用可重建索引和稳定摘要。
 
 更完整的理论基石（认知科学 / 控制论 / 系统论）、Agentic Agile 宣言、成熟度模型（L1–L4）、落地路线图，见 [`docs/whitepaper/`](docs/whitepaper/)。
 
@@ -43,7 +44,7 @@
 | 单项目携证发布 / 制品证据绑定 / 发布回滚事实 | `scripts/release_manifest.py`、`Template_Release_Manifest.yaml` |
 | 证据包审计 | `scripts/audit_evidence.py` |
 | 三方一致性 / 回滚安全 / 时效 / 跨模块 | `scripts/verify_*.py` |
-| 上下文工程三层注入 | `scripts/crop_context.py` |
+| 上下文工程三层注入 + L0-L3 双地图渐进增强 | `scripts/crop_context.py`、`scripts/context_providers.py` |
 | 工作图 DAG 引擎 | `scripts/graph_engine.py` |
 | 工具审计 | `scripts/audit_tools.py` |
 | 遥测采集（4 层 9 维） + Token 实测 | `scripts/collect_telemetry.py`、`scripts/token_usage.py`、`fetch_token_usage.sh` |
@@ -106,6 +107,8 @@ python scripts/cli.py recon task --task T-001 --target src/example.py --project-
 ### 双地图增强 Recon（v1.37.0）
 
 IWE 推荐负责 Document Map（需求、规则、AC、ADR、历史决策），codebase-memory-mcp 推荐负责 Code Map（模块、符号、调用、路由、测试），343 用统一 ID 维护 Trace Link。两者均为可选能力：无外部工具时保持 L0；仅 Code Map 为 L1，仅 Document Map 为 L2，双地图为 L3。支持 Agent-native MCP 与项目内显式 JSON/YAML 制品，失败或过期时记录 Unknown 并安全回退；不会自动安装、配置、联网、回写知识库或扩大 Change Envelope。
+
+v1.40.0 补齐原生索引到标准地图工件、再到 Agent Prompt 的链路。`crop_context.py` 默认注入受预算限制的 Map Context；单地图继续增强，无地图使用契约、约束和内建扫描。团队项目建议由 CI 生成 `authority: ci` 的确定性快照，本地使用 `recon.py --map-mode team` 只消费校验，缺失时仅生成 `.local` 回退，避免覆盖共享地图。过期、损坏和查询失败会披露影响与恢复建议，而不是静默 Unknown。
 
 正式围栏经 IO 确认为 `AUTHORIZED` 后，可执行 `python scripts/cli.py envelope check --task T-001 --project-dir .`，机械检查全部 Git 变更；存在正式围栏时 prove 门自动执行，越界或 Unknown 直接阻断。
 

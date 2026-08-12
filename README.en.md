@@ -1,4 +1,4 @@
-# Agentic Agile 3-4-3 Governance Framework · Open Source Edition v1.39.1
+# Agentic Agile 3-4-3 Governance Framework · Open Source Edition v1.42.0
 
 > 🌐 中文版: [README.md](README.md)
 
@@ -28,6 +28,7 @@ Moving from casual **Vibe Coding** to rigorous **Verified Engineering** requires
 - **3 autonomous mechanisms**: intent injection (dialogue → contract gate), high-frequency adversarial self-purification loop, human exception arbitration (HITL + evidence-bundle acceptance).
 - **Six continuous control planes in SCOPE-V**: `S / C / O / Prove ⇄ Evolve / V`; the fast proof-evolution loop is complemented by the slow `Verify → Telemetry → Specify/Constrain/Orchestrate` feedback loop.
 - **Cross-cutting autonomy**: context, execution, and evolution mechanisms operate across the control planes instead of mapping one-to-one to stages.
+- **Scales to large repositories and long histories**: Map-first Recon uses bounded provider queries, L0 performs one bounded fallback, and event/project telemetry uses rebuildable indexes and stable summaries.
 
 For the full theoretical foundation (cognitive science / cybernetics / systems theory), the Agentic Agile Manifesto, the maturity model (L1–L4), and the adoption roadmap, see [`docs/whitepaper/`](docs/whitepaper/).
 

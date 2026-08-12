@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import re
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -37,10 +38,72 @@ def _ledger(project):
     return Path(project).resolve() / "governance/telemetry/execution-events.jsonl"
 
 
+def _index(project):
+    return Path(project).resolve() / "governance/telemetry/execution-events.index.sqlite3"
+
+
+def _open_index(project):
+    path = _index(project)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(path)
+    connection.execute(
+        "CREATE TABLE IF NOT EXISTS events (event_id TEXT PRIMARY KEY, task_id TEXT, event TEXT, offset INTEGER)"
+    )
+    connection.execute("CREATE INDEX IF NOT EXISTS events_task ON events(task_id, offset)")
+    connection.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
+    return connection
+
+
+def _ensure_index(project):
+    ledger = _ledger(project)
+    connection = _open_index(project)
+    indexed = connection.execute("SELECT value FROM meta WHERE key='ledger_size'").fetchone()
+    actual_size = ledger.stat().st_size if ledger.is_file() else 0
+    if indexed and int(indexed[0]) == actual_size:
+        return connection
+    connection.execute("DELETE FROM events")
+    offset = 0
+    if ledger.is_file():
+        with ledger.open("rb") as stream:
+            for raw in stream:
+                try:
+                    item = json.loads(raw.decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    offset += len(raw)
+                    continue
+                if item.get("event_id"):
+                    connection.execute(
+                        "INSERT OR IGNORE INTO events(event_id, task_id, event, offset) VALUES(?,?,?,?)",
+                        (item["event_id"], item.get("task_id"), item.get("event"), offset),
+                    )
+                offset += len(raw)
+    connection.execute(
+        "INSERT INTO meta(key,value) VALUES('ledger_size',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (str(actual_size),),
+    )
+    connection.commit()
+    return connection
+
+
 def read_events(project, task_id=None):
     path = _ledger(project)
     if not path.is_file():
         return []
+    if task_id:
+        connection = _ensure_index(project)
+        offsets = [row[0] for row in connection.execute(
+            "SELECT offset FROM events WHERE task_id=? ORDER BY offset", (task_id,)
+        )]
+        connection.close()
+        events = []
+        with path.open("rb") as stream:
+            for offset in offsets:
+                stream.seek(offset)
+                try:
+                    events.append(json.loads(stream.readline().decode("utf-8")))
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    continue
+        return events
     events = []
     for line in path.read_text(encoding="utf-8").splitlines():
         try:
@@ -68,11 +131,24 @@ def append_event(project, task_id, event, *, result=None, actor=None,
     canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     payload["event_id"] = "sha256:" + hashlib.sha256(canonical.encode()).hexdigest()
     path = _ledger(project)
-    existing = {e.get("event_id") for e in read_events(project)}
-    if payload["event_id"] not in existing:
+    connection = _ensure_index(project)
+    existing = connection.execute("SELECT 1 FROM events WHERE event_id=?", (payload["event_id"],)).fetchone()
+    if not existing:
         path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8", newline="\n") as stream:
-            stream.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
+        rendered = (json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n").encode("utf-8")
+        offset = path.stat().st_size if path.is_file() else 0
+        with path.open("ab") as stream:
+            stream.write(rendered)
+        connection.execute(
+            "INSERT INTO events(event_id, task_id, event, offset) VALUES(?,?,?,?)",
+            (payload["event_id"], task_id, event, offset),
+        )
+        connection.execute(
+            "INSERT INTO meta(key,value) VALUES('ledger_size',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (str(offset + len(rendered)),),
+        )
+        connection.commit()
+    connection.close()
     return payload
 
 

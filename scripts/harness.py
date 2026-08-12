@@ -35,6 +35,26 @@ import sys
 from datetime import datetime, date
 from pathlib import Path
 from command_runner import run_command, run_shell
+from runtime_context import load_trusted_verification_context, parse_test_output, resolve_test_plan
+
+
+_RUNTIME_FILE_CACHE = {}
+_RUNTIME_INVENTORY_CACHE = {}
+
+
+def reset_runtime_caches():
+    """Reset per-command source caches before a new Harness lifecycle."""
+    _RUNTIME_FILE_CACHE.clear()
+    _RUNTIME_INVENTORY_CACHE.clear()
+
+
+def _read_source(path: Path) -> str:
+    # rglob yields stable absolute paths for the absolute project roots used by
+    # Harness. Avoid Path.resolve() on every cache hit in multi-validator scans.
+    key = path if path.is_absolute() else path.absolute()
+    if key not in _RUNTIME_FILE_CACHE:
+        _RUNTIME_FILE_CACHE[key] = path.read_text(encoding="utf-8", errors="ignore")
+    return _RUNTIME_FILE_CACHE[key]
 
 
 def _load_yaml(path: Path) -> dict:
@@ -208,11 +228,16 @@ _NFR_SOURCE_EXTS = ["*.py", "*.ts", "*.tsx", "*.js", "*.jsx",
 
 def _iter_nfr_files(target: Path):
     """遍历目录下所有受支持源码文件（Python + TS/JS），忽略权限/编码错误"""
-    for ext in _NFR_SOURCE_EXTS:
-        try:
-            yield from target.rglob(ext)
-        except Exception:
-            continue
+    resolved = target.resolve()
+    if resolved not in _RUNTIME_INVENTORY_CACHE:
+        files = []
+        for ext in _NFR_SOURCE_EXTS:
+            try:
+                files.extend(target.rglob(ext))
+            except Exception:
+                continue
+        _RUNTIME_INVENTORY_CACHE[resolved] = tuple(sorted(set(files)))
+    yield from _RUNTIME_INVENTORY_CACHE[resolved]
 
 
 # 源码根目录（用于语言判定），排除构建产物与依赖
@@ -287,7 +312,7 @@ def nfr_secrets(project_dir: Path, params: dict) -> tuple[bool, str]:
             if any(ex in str(fp) for ex in exclude_dirs):
                 continue
             try:
-                content = fp.read_text()
+                content = _read_source(fp)
                 for pattern, label in patterns:
                     matches = re.findall(pattern, content, re.IGNORECASE)
                     for m in matches:
@@ -320,7 +345,7 @@ def nfr_health_endpoint(project_dir: Path, params: dict) -> tuple[bool, str]:
             continue
         for fp in _iter_nfr_files(target):
             try:
-                content = fp.read_text()
+                content = _read_source(fp)
                 for pat in patterns:
                     if re.search(pat, content, re.IGNORECASE):
                         found = True
@@ -358,7 +383,7 @@ def nfr_retry_pattern(project_dir: Path, params: dict) -> tuple[bool, str]:
             continue
         for fp in _iter_nfr_files(target):
             try:
-                content = fp.read_text()
+                content = _read_source(fp)
                 for kw in retry_keywords:
                     if kw in content:
                         found_keywords.add(kw)
@@ -393,7 +418,7 @@ def nfr_log_structured(project_dir: Path, params: dict) -> tuple[bool, str]:
             continue
         for fp in _iter_nfr_files(target):
             try:
-                content = fp.read_text()
+                content = _read_source(fp)
                 for ind in structured_indicators:
                     if ind in content:
                         found.add(ind)
@@ -432,7 +457,7 @@ def nfr_monitoring_endpoint(project_dir: Path, params: dict) -> tuple[bool, str]
             continue
         for fp in _iter_nfr_files(target):
             try:
-                content = fp.read_text()
+                content = _read_source(fp)
                 if any(ind in content for ind in indicators):
                     return True, "检测到指标暴露端点"
             except Exception:
@@ -447,6 +472,16 @@ def nfr_monitoring_endpoint(project_dir: Path, params: dict) -> tuple[bool, str]
 @nfr_register("test_run", "运行项目测试套件并采集结构化结果（Node/vitest/jest、Python/pytest、Go/go test、Rust/cargo test、Java/mvn test、C#/dotnet test）")
 def nfr_test_run(project_dir: Path, params: dict) -> tuple[bool, str]:
     """运行测试套件；返回 (是否通过, 详情)。详情含结构化计数。"""
+    context_path = params.get("verification_context")
+    if context_path:
+        context, reason = load_trusted_verification_context(context_path, project_dir)
+        if context is not None:
+            return True, (
+                "reused trusted Verification Run Context: "
+                f"{context.get('passed', 0)}/{context.get('total', 0)} "
+                f"runner={context.get('runner', 'unknown')}"
+            )
+        return False, f"Verification Run Context rejected: {reason}"
     res = run_tests(project_dir, params)
     return (res.get("passed", 0) > 0 and res.get("failed", 0) == 0), res.get("detail", "")
 
@@ -457,42 +492,8 @@ load_nfr_plugins()
 
 def _detect_test_command(project_dir: Path) -> dict:
     """探测项目测试命令，返回 {runner, cmd, kind} 或 {runner: None}"""
-    pkg = project_dir / "package.json"
-    if pkg.exists():
-        try:
-            data = json.loads(pkg.read_text())
-            test_script = (data.get("scripts", {}) or {}).get("test", "")
-            if test_script:
-                if "vitest" in test_script:
-                    return {"runner": "vitest", "cmd": ["npx", "vitest", "run", "--reporter=json"], "kind": "node"}
-                if "jest" in test_script:
-                    return {"runner": "jest", "cmd": ["npx", "jest", "--json"], "kind": "node"}
-                return {"runner": "npm", "cmd": ["npm", "test"], "kind": "node"}
-        except Exception:
-            pass
-    # Python: prefer stdlib unittest for repo-local suites so Windows users do
-    # not need pytest for the public harness tests command.
-    tests_dir = project_dir / "tests"
-    if tests_dir.is_dir() or list(project_dir.glob("test_*.py")):
-        cmd = [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"]
-        if (tests_dir / "__init__.py").is_file():
-            cmd = [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-t", ".", "-v"]
-        return {"runner": "unittest", "cmd": cmd, "kind": "python"}
-    if (project_dir / "pyproject.toml").exists() or (project_dir / "pytest.ini").exists():
-        return {"runner": "pytest", "cmd": [sys.executable, "-m", "pytest", "--tb=no", "-q"], "kind": "python"}
-    # Go
-    if (project_dir / "go.mod").exists():
-        return {"runner": "go", "cmd": ["go", "test", "-v", "./..."], "kind": "go"}
-    # Rust
-    if (project_dir / "Cargo.toml").exists():
-        return {"runner": "cargo", "cmd": ["cargo", "test"], "kind": "rust"}
-    # Java (Maven)
-    if (project_dir / "pom.xml").exists():
-        return {"runner": "mvn", "cmd": ["mvn", "test", "-q"], "kind": "java"}
-    # C# (.NET)
-    if list(project_dir.glob("*.csproj")) or list(project_dir.glob("*.sln")):
-        return {"runner": "dotnet", "cmd": ["dotnet", "test"], "kind": "dotnet"}
-    return {"runner": None}
+    plan = resolve_test_plan(project_dir)
+    return {"runner": plan["runner"], "cmd": plan["argv"], "kind": plan["kind"]}
 
 
 def run_tests(project_dir: Path, params: dict | None = None) -> dict:
@@ -540,6 +541,9 @@ def run_tests(project_dir: Path, params: dict | None = None) -> dict:
 
 
 def _parse_test_output(runner: str, out: str) -> dict:
+    shared = parse_test_output(runner, out)
+    if shared["total"] or runner in {"unittest", "pytest", "vitest", "jest", "npm", "go", "cargo", "mvn", "dotnet"}:
+        return shared
     base = {"total": 0, "passed": 0, "failed": 0, "errors": 0}
     # Go / Rust / Java / C# 专用解析器
     if runner == "go":
@@ -832,9 +836,9 @@ def get_failure_policy(constraint: dict, data: dict) -> str:
 
 def check_constraints(project_dir: Path, domain: str = None, gate: str = None,
                       format: str = "text", nfr_only: bool = False,
-                      module: str = None) -> dict:
+                      module: str = None, data: dict | None = None) -> dict:
     """执行约束检查"""
-    data = load_constraints(project_dir, module)
+    data = data or load_constraints(project_dir, module)
     constraints = data.get("constraints", [])
     exceptions = data.get("exceptions", [])
 
@@ -986,6 +990,7 @@ def print_text(report: dict):
 
 
 def main():
+    reset_runtime_caches()
     parser = argparse.ArgumentParser(description="Harness Engine — 约束执行引擎")
     sub = parser.add_subparsers(dest="command")
 
@@ -998,6 +1003,8 @@ def main():
     check_parser.add_argument("--format", choices=["text", "json"], default="text")
     check_parser.add_argument("--project-dir", default=".", help="项目根目录")
     check_parser.add_argument("--module", default=None, help="模块 ID（加载 modules/<id>/constraints.yaml 叠加检查）")
+    check_parser.add_argument("--verification-context", default=None,
+                              help="可信 Verification Run Context，供 nfr:test_run 复用")
 
     # list 子命令
     list_parser = sub.add_parser("list", help="列出所有约束")
@@ -1047,8 +1054,16 @@ def main():
             print("请���定 --all / --domain / --gate", file=sys.stderr)
             sys.exit(1)
 
-        report = check_constraints(project_dir, args.domain, args.gate, args.format,
-                                   nfr_only=args.nfr_only, module=getattr(args, "module", None))
+        if args.verification_context:
+            data = load_constraints(project_dir, getattr(args, "module", None))
+            for constraint in data.get("constraints", []):
+                if constraint.get("check") == "nfr:test_run":
+                    constraint.setdefault("nfr_params", {})["verification_context"] = args.verification_context
+            report = check_constraints(project_dir, args.domain, args.gate, args.format,
+                                       nfr_only=args.nfr_only, module=getattr(args, "module", None), data=data)
+        else:
+            report = check_constraints(project_dir, args.domain, args.gate, args.format,
+                                       nfr_only=args.nfr_only, module=getattr(args, "module", None))
 
         if args.format == "json":
             print(json.dumps(report, indent=2, ensure_ascii=False))

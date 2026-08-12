@@ -2,14 +2,45 @@
 
 > 🌐 中文版: [RELEASE_NOTES.md](RELEASE_NOTES.md)
 
-# Agentic Agile 3-4-3 Governance Framework · Open Source Edition v1.39.1
+# Agentic Agile 3-4-3 Governance Framework · Open Source Edition v1.42.0
 
 > **Calibrate first, then fight the bosses.** A complete, runnable governance framework for Agentic AI development — fully open source, no reservations. Let AI R&D governance be both offensive and defensive.
 
-- **Version**: `1.39.1`
+- **Version**: `1.42.0`
 - **Release date**: 2026-08-12
 - **License**: Code/templates MIT · Whitepaper CC BY 4.0
 - **Author**: Wang Lijie (无敌哥), AI Governance Architect
+
+## v1.42.0: Map-first Recon and incremental long-history governance
+
+- IWE and codebase-memory-mcp queries now enforce item, token, byte, and stage-timeout budgets; full-map exports are prohibited.
+- Task Recon reads bounded map candidates first; without a usable map, L0 performs one bounded `rg` fallback and excludes provider databases and caches.
+- Shared/local and fresh/stale/damaged map states have deterministic consume, rebuild, degrade, and recovery paths.
+- The JSONL event ledger gains a rebuildable SQLite side index; project telemetry stores aggregation facts in stable run summaries instead of reopening historical run files.
+- Evidence finalize prepares verification and then performs one final persistence, eliminating the intermediate project dashboard.
+- Automated scale budgets cover 12,000-file Map-first Recon, 10,000 events, and 10,000 run summaries.
+
+## v1.41.0: Runtime deduplication and shared project snapshots
+
+- Gate, Harness, and Telemetry consume one `TestExecutionPlan`; Verification Context records the actual argv and verifies its checksum.
+- `nfr:test_run` reuses a trusted Verification Run Context instead of rerunning tests through Harness.
+- A workflow-scoped `ProjectSnapshot` shares file inventory, Git revision, and source digest work.
+- Harness NFR validators share source inventory and content caching; the 12,000-file five-check benchmark drops from about 2.96s to about 0.59s.
+- Crop Context builds map context once and calls code discovery in-process; the current-project benchmark drops from about 0.81s to about 0.04s.
+
+## v1.40.1: Evidence finalization performance governance
+
+- Removes hidden `harness tests` reruns; the trusted Verification Run Context is the sole test snapshot.
+- Uses metrics-only refresh after the formal verification event.
+- Adds write preflight, stage progress, and elapsed timing.
+- Discloses external, internal, and total test execution/reuse counts.
+
+## v1.40.0: Native dual-map adapters and automatic Agent context injection
+
+- Recon normalizes structured IWE and codebase-memory-mcp results into deterministic standard map artifacts.
+- `crop_context.py` injects bounded L0-L3 Document Map, Code Map, candidate Trace Links, and Unknown state by default.
+- Team mode consumes `authority: ci` snapshots first and writes missing-map fallback only under `.local`.
+- Stale, damaged, or failed providers disclose impact and manual recovery actions while safely degrading.
 - **Official site**: <http://agentic.iloveagile.me/about> · WeChat `iloveagile`
 
 ---

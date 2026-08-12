@@ -7,6 +7,7 @@ from pathlib import Path
 
 from assess_risk import PROFILES, assess_risk
 from recon import render_recon, scan_project
+from project_snapshot import ProjectSnapshot
 
 
 IGNORED = {".git", ".venv", "venv", "node_modules", "__pycache__", "governance", "tests"}
@@ -21,10 +22,11 @@ def _project_files(project: Path) -> list[Path]:
     ]
 
 
-def classify_project(project_dir: Path | str) -> str:
+def classify_project(project_dir: Path | str, snapshot: ProjectSnapshot | None = None) -> str:
     """区分新项目、既有小项目、复杂遗留和多模块项目。"""
     project = Path(project_dir).resolve()
-    files = _project_files(project)
+    files = list(snapshot.files) if snapshot is not None else _project_files(project)
+    files = [path for path in files if not any(part in IGNORED for part in path.relative_to(project).parts)]
     if not files:
         return "new"
     module_roots = []
@@ -181,10 +183,11 @@ def build_init_plan(
     if not project.is_dir():
         raise ValueError(f"project directory does not exist: {project}")
     facts = dict(facts or {})
-    project_type = classify_project(project)
+    snapshot = ProjectSnapshot.capture(project)
+    project_type = classify_project(project, snapshot)
     # Governance planning must remain a zero-write dry run; map initialization
     # belongs to an explicit project Recon, not risk-plan discovery.
-    recon = None if project_type == "new" else scan_project(project, auto_context=False)
+    recon = None if project_type == "new" else scan_project(project, auto_context=False, snapshot=snapshot)
     if project_type == "legacy-complex":
         facts.setdefault("legacy", True)
     if project_type == "multi-module":

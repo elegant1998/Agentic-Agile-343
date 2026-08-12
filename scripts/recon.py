@@ -9,8 +9,9 @@ from datetime import date
 from pathlib import Path
 
 from context_providers import build_context, build_project_maps
+from project_snapshot import ProjectSnapshot
 
-IGNORED_PARTS = {".git", ".venv", "venv", "node_modules", "__pycache__"}
+IGNORED_PARTS = {".git", ".venv", "venv", "node_modules", "__pycache__", "dist", "build", ".iwe", ".codebase-memory"}
 LANGUAGE_SUFFIXES = {".py": "Python", ".js": "JavaScript", ".ts": "TypeScript", ".tsx": "TypeScript", ".java": "Java", ".go": "Go", ".rs": "Rust", ".cpp": "C++", ".c": "C"}
 
 
@@ -25,13 +26,14 @@ def _files(project: Path) -> list[Path]:
 
 def scan_project(
     project_dir: Path | str, provider_inputs=(), agent_providers=(), context_max_items=None,
-    context_recommendations=True, auto_context=True, persistence=True,
+    context_recommendations=True, auto_context=True, persistence=True, map_mode="single",
+    snapshot: ProjectSnapshot | None = None,
 ) -> dict:
     """只读扫描既有项目，明确区分事实、保留项和未知项。"""
     project = Path(project_dir).expanduser().resolve()
     if not project.is_dir():
         raise ValueError(f"project directory does not exist: {project}")
-    files = _files(project)
+    files = list((snapshot or ProjectSnapshot.capture(project)).files)
     relative = [path.relative_to(project).as_posix() for path in files]
     languages = Counter(LANGUAGE_SUFFIXES[p.suffix] for p in files if p.suffix in LANGUAGE_SUFFIXES)
     git_rc, branch = _git(project, "branch", "--show-current")
@@ -65,7 +67,7 @@ def scan_project(
         unknown.append("Implementation language and executable entry points require human confirmation")
     map_build = None
     if auto_context and not provider_inputs:
-        map_build = build_project_maps(project, persistence=persistence)
+        map_build = build_project_maps(project, persistence=persistence, mode=map_mode)
     context = build_context(project, provider_inputs, agent_providers, context_max_items, context_recommendations)
     context["map_build"] = map_build
     context["project_root"] = str(project)
@@ -146,12 +148,13 @@ def main() -> None:
     parser.add_argument("--no-context-recommendations", action="store_true", help="Suppress optional provider suggestions")
     parser.add_argument("--no-auto-context", action="store_true", help="Do not initialize project maps when providers are available")
     parser.add_argument("--persistence", choices=["true", "false"], default="true", help="Persist provider indexes at project scope")
+    parser.add_argument("--map-mode", choices=["single", "team"], default="single", help="single may refresh shared maps; team preserves CI authority and uses local fallback")
     parser.add_argument("--output", help="显式指定时才写文件；否则输出到 stdout")
     args = parser.parse_args()
     rendered = render_recon(scan_project(
         args.project_dir, args.context_provider, args.agent_provider,
         args.context_max_items, not args.no_context_recommendations,
-        not args.no_auto_context, args.persistence == "true",
+        not args.no_auto_context, args.persistence == "true", args.map_mode,
     ), args.format)
     if args.output:
         output = Path(args.output).expanduser()

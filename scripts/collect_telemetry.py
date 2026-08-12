@@ -232,6 +232,39 @@ def _read_run_file(project_dir: Path, file_rel: str | None) -> dict | None:
     return _load_json(p)
 
 
+def _raw_summary_from_telemetry(telemetry: dict) -> dict:
+    """Extract the small, stable facts needed for project aggregation."""
+    value = telemetry.get("value") or {}
+    capability = telemetry.get("capability") or {}
+    evolution = telemetry.get("evolution") or {}
+    goal = value.get("goal_accuracy") or {}
+    first_pass = value.get("first_pass_rate") or {}
+    auto_heal = capability.get("auto_heal_rate") or {}
+    must_pass = capability.get("must_pass_rate") or {}
+    hitl = capability.get("hitl_escalation_rate") or {}
+    knowledge = evolution.get("knowledge_crystallization") or {}
+    measurements = {
+        "tasks_assigned": {"value": goal.get("tasks_assigned"), "status": goal.get("status")},
+        "tasks_completed": {"value": goal.get("tasks_completed"), "status": goal.get("status")},
+        "tasks_first_pass": {"value": first_pass.get("tasks_first_pass"), "status": first_pass.get("status")},
+        "auto_healed": {"value": auto_heal.get("auto_healed"), "status": auto_heal.get("status")},
+        "constraint_failures_total": {
+            "value": auto_heal.get("failures_total"), "status": auto_heal.get("status")
+        },
+    }
+    return {
+        "measurements": measurements,
+        "must_passed": int(must_pass.get("must_passed", 0) or 0),
+        "must_total": int(must_pass.get("must_total", 0) or 0),
+        "hitl_count": int(hitl.get("hitl_count", 0) or 0),
+        "execution_rounds": int(hitl.get("execution_rounds", 0) or 0),
+        "token_usage": int((telemetry.get("cost") or {}).get("token_usage", 0) or 0),
+        "token_source": str((telemetry.get("cost") or {}).get("token_source", "estimated")),
+        "new_patterns": int(knowledge.get("new_patterns_this_cycle", 0) or 0),
+        "total_patterns": int(knowledge.get("total_patterns_accumulated", 0) or 0),
+    }
+
+
 def _accumulate_runs_raw(project_dir: Path, run_summaries: list, latest_contract: dict) -> dict:
     """跨所有契约 run 文件累加原始计数，用于项目级累计遥测。
 
@@ -257,44 +290,34 @@ def _accumulate_runs_raw(project_dir: Path, run_summaries: list, latest_contract
         "tasks_assigned", "tasks_completed", "tasks_first_pass",
         "constraint_failures_total", "auto_healed")}
     total_patterns = 0
-    for r in run_summaries:
-        d = _read_run_file(project_dir, r.get("file"))
-        if not d:
-            continue
-        v = d.get("value", {})
-        c = d.get("capability", {})
-        ev = d.get("evolution", {})
-        ga = v.get("goal_accuracy", {})
-        fp = v.get("first_pass_rate", {})
-        ah = c.get("auto_heal_rate", {})
-        mp = c.get("must_pass_rate", {})
-        he = c.get("hitl_escalation_rate", {})
-        kc = ev.get("knowledge_crystallization", {})
-        entries = {
-            "tasks_assigned": (ga, "tasks_assigned"),
-            "tasks_completed": (ga, "tasks_completed"),
-            "tasks_first_pass": (fp, "tasks_first_pass"),
-            "auto_healed": (ah, "auto_healed"),
-            "constraint_failures_total": (ah, "failures_total"),
-        }
-        for name, (metric, field) in entries.items():
+    for run in run_summaries:
+        summary = run.get("raw_summary")
+        if not isinstance(summary, dict):
+            telemetry = _read_run_file(project_dir, run.get("file"))
+            if not telemetry:
+                continue
+            summary = _raw_summary_from_telemetry(telemetry)
+            run["raw_summary"] = summary
+        for name, metric in (summary.get("measurements") or {}).items():
+            if name not in coverage:
+                continue
             coverage[name]["eligible"] += 1
             status = metric.get("status")
             # v1.33 and earlier run files had no Measurement Contract status.
             # Treat absent status as trusted legacy data during --rebuild, while
             # keeping explicit UNKNOWN / NOT_APPLICABLE out of aggregation.
-            if (status is None or status in ("MEASURED", "DERIVED", "DECLARED")) and metric.get(field) is not None:
-                raw[name] += int(metric[field])
+            if (status is None or status in ("MEASURED", "DERIVED", "DECLARED")) and metric.get("value") is not None:
+                raw[name] += int(metric["value"])
                 coverage[name]["measured"] += 1
-        raw["must_passed"] += int(mp.get("must_passed", 0) or 0)
-        raw["must_total"] += int(mp.get("must_total", 0) or 0)
-        raw["hitl_count"] += int(he.get("hitl_count", 0) or 0)
-        raw["execution_rounds"] += int(he.get("execution_rounds", 0) or 0)
-        raw["token_usage"] += int((d.get("cost") or {}).get("token_usage", 0) or 0)
-        token_sources.add(str((d.get("cost") or {}).get("token_source", "estimated")))
-        raw["new_patterns"] += int(kc.get("new_patterns_this_cycle", 0) or 0)
+        raw["must_passed"] += int(summary.get("must_passed", 0) or 0)
+        raw["must_total"] += int(summary.get("must_total", 0) or 0)
+        raw["hitl_count"] += int(summary.get("hitl_count", 0) or 0)
+        raw["execution_rounds"] += int(summary.get("execution_rounds", 0) or 0)
+        raw["token_usage"] += int(summary.get("token_usage", 0) or 0)
+        token_sources.add(str(summary.get("token_source", "estimated")))
+        raw["new_patterns"] += int(summary.get("new_patterns", 0) or 0)
         # total_patterns 为项目累积快照（最新契约已含历史），取最大值
-        tp = int(kc.get("total_patterns_accumulated", 0) or 0)
+        tp = int(summary.get("total_patterns", 0) or 0)
         if tp > total_patterns:
             total_patterns = tp
     # 以最新契约快照中的 total_patterns 为准（已是累积值）
@@ -481,6 +504,7 @@ def persist_telemetry(args, telemetry: dict) -> dict:
         # 去重同 task_id，新的覆盖旧的
         old_runs = [r for r in old_runs if r.get("task_id") != task_id]
         summary = _summarize_for_index(telemetry)
+        summary["raw_summary"] = _raw_summary_from_telemetry(telemetry)
         old_runs.append(summary)
         # 按时间排序
         old_runs.sort(key=lambda r: r.get("collected_at") or "")
@@ -999,21 +1023,52 @@ def _wire_matrix(args, task_id):
     else:
         project_dir = Path.cwd()
     if getattr(args, "auto_nfr", True) and _is_web_or_code_project(project_dir):
-        args._matrix_gov = _auto_run_nfr(project_dir)
-        args._matrix_tests = _derive_tests_from_matrix(project_dir)
+        if getattr(args, "skip_matrix_check", False) and task_id:
+            previous = _load_json(project_dir / "governance" / "telemetry" / "runs" / f"telemetry-{task_id}.json") or {}
+            gov = previous.get("governance") or {}
+            args._matrix_gov = {
+                "gates": gov.get("gates", []), "gates_passed": gov.get("gates_passed", 0),
+                "gates_total": gov.get("gates_total", 0), "passed": gov.get("gates_passed", 0),
+                "total": gov.get("gates_total", 0), "must_constraints": gov.get("must_constraints", 0),
+                "must_failed": gov.get("must_failed", 0), "skipped": False, "error": "",
+                "nfr": {**(gov.get("nfr") or {}), "source": "reused_contract_telemetry"},
+            }
+        else:
+            args._matrix_gov = _auto_run_nfr(
+                project_dir, getattr(args, "verification_context", None)
+            )
+        if getattr(args, "skip_matrix_tests", False):
+            total = max(0, int(getattr(args, "test_total", 0) or 0))
+            passed = max(0, int(getattr(args, "test_passed", 0) or 0))
+            args._matrix_tests = {
+                "skipped": False, "error": "", "source": "verification_run_context",
+                "tests": {"total": total, "passed": passed, "failed": max(0, total - passed),
+                          "errors": 0, "pass_rate": _safe_ratio(passed, max(total, 1)),
+                          "status": "PASS" if total and passed == total else "FAIL" if total else "UNKNOWN",
+                          "runner": getattr(args, "test_runner", None) or "trusted_context",
+                          "detail": "reused trusted Verification Run Context"},
+                "coverage": {"line_rate": getattr(args, "coverage_pct", 0.0),
+                             "threshold": getattr(args, "coverage_threshold", 90.0),
+                             "status": "UNKNOWN"},
+            }
+        else:
+            args._matrix_tests = _derive_tests_from_matrix(project_dir)
     else:
         args._matrix_gov = None
         args._matrix_tests = None
 
 
-def _auto_run_nfr(project_dir: Path) -> dict:
+def _auto_run_nfr(project_dir: Path, verification_context: str | None = None) -> dict:
     """从约束矩阵派生门禁（harness check --all）：按 MUST 约束判定每门禁通过。
 
     返回所有 G0-G8 的逐条状态与 MUST 计数。
     保证 Web/TS/Go 等项目在采集时必然评估全部门禁（含 G6-G8 Web 扩展），
     且判定逻辑完全来自约束矩阵，而非手动传 --gates-total。
     """
-    rep = _run_harness_json(project_dir, "check", ["--all", "--format", "json"])
+    extra = ["--all", "--format", "json"]
+    if verification_context:
+        extra.extend(["--verification-context", verification_context])
+    rep = _run_harness_json(project_dir, "check", extra)
     if not rep or "__error__" in rep:
         return {"gates": [], "passed": 0, "total": 0, "skipped": True,
                 "error": (rep or {}).get("__error__", "harness 调用失败"),
@@ -1174,6 +1229,14 @@ def main():
     parser.add_argument("--test-passed", type=int, default=0)
     parser.add_argument("--test-failed", type=int, default=0)
     parser.add_argument("--test-errors", type=int, default=0)
+    parser.add_argument("--skip-matrix-tests", action="store_true",
+                        help="使用显式可信测试快照，不再调用 harness tests")
+    parser.add_argument("--skip-matrix-check", action="store_true",
+                        help="复用既有单任务门禁快照，不再调用 harness check")
+    parser.add_argument("--test-runner", default=None,
+                        help="可信测试快照的 runner，仅与 --skip-matrix-tests 一起使用")
+    parser.add_argument("--verification-context", default=None,
+                        help="传给 Harness 的可信 Verification Run Context 路径")
     parser.add_argument("--coverage-pct", type=float, default=0.0)
     parser.add_argument("--coverage-threshold", type=float, default=90.0)
     parser.add_argument("--bench-warmup", type=int, default=1000)
@@ -1282,7 +1345,7 @@ def main():
         project_root = project_path.parent.parent
         if getattr(args, "auto_nfr", True) and _is_web_or_code_project(project_root):
             mg = _auto_run_nfr(project_root)
-            tests = _derive_tests_from_matrix(project_root)
+            tests = None if getattr(args, "skip_matrix_tests", False) else _derive_tests_from_matrix(project_root)
             gov = agg.get("governance", {}) or {}
             if mg.get("skipped"):
                 gov["nfr"] = mg["nfr"]
@@ -1293,7 +1356,7 @@ def main():
                 gov["must_constraints"] = mg["must_constraints"]
                 gov["must_failed"] = mg["must_failed"]
                 gov["nfr"] = mg["nfr"]
-            if not tests.get("skipped"):
+            if tests and not tests.get("skipped"):
                 agg["pipeline"] = {"tests": tests["tests"]}
                 agg["quality"] = {"coverage": tests["coverage"]}
             agg["governance"] = gov
