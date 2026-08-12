@@ -2,14 +2,21 @@
 
 > 🌐 English version: [RELEASE_NOTES.en.md](RELEASE_NOTES.en.md)
 
-# Agentic Agile 3-4-3 治理架构 · 开源版 v1.45.0
+# Agentic Agile 3-4-3 治理架构 · 开源版 v1.45.1
 
 > **先校准、再打怪。** 这是完整、可运行的 Agentic AI 研发治理框架——全部开源，无保留。让 AI 研发治理，进可攻退可守。
 
-- **版本**：`1.45.0`
+- **版本**：`1.45.1`
 - **发布日期**：2026-08-12
 - **许可证**：代码/模板 MIT · 白皮书 CC BY 4.0
 - **作者**：王立杰（无敌哥），AI 治理架构师
+
+## v1.45.1：收口时宿主工具身份透传（T-149）
+
+- 修复 T-148 AC-004 跨工具身份的尾巴：此前收口时宿主工具身份未透传到 Token 探针，单任务遥测的 `cost.token_measurement.host_tool` 会退化成 `other`，Token 客户端与项目身份被混为一谈。
+- `change verify` 现在把 `--host-tool` / `--token-client` 一路透传：`change_workflow.run_stage` → `evidence_workflow.finalize_evidence` → `telemetry_workflow.py` 的 `collect_token_measurement`，单任务遥测的 `host_tool` 如实落为调用方身份（如 `codex`）。
+- `evidence_workflow.finalize_evidence` 新增 `host_tool` / `token_clients` 参数，`_build_collector_command` 在 prepare 与 final persist 两条命令注入 `--host-tool` / `--token-client`；不传时缺省不注入，保持向后兼容。
+- 配套 8 项 TDD 测试全覆盖入口透传、命令注入、缺省兼容与收口串联；`change verify --host-tool codex` 收口 243/243 测试全绿，验证事实链 `VERIFIED`，`telemetry-T-149.json` 中 `host_tool=codex`、`source=measured:ocusage:codex`（真实探针，非硬编码）。
 
 ## v1.45.0：跨 AI 工具可信遥测与不可旁路收口
 

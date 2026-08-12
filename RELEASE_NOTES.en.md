@@ -2,14 +2,21 @@
 
 > 🌐 中文版: [RELEASE_NOTES.md](RELEASE_NOTES.md)
 
-# Agentic Agile 3-4-3 Governance Framework · Open Source Edition v1.45.0
+# Agentic Agile 3-4-3 Governance Framework · Open Source Edition v1.45.1
 
 > **Calibrate first, then fight the bosses.** A complete, runnable governance framework for Agentic AI development — fully open source, no reservations. Let AI R&D governance be both offensive and defensive.
 
-- **Version**: `1.45.0`
+- **Version**: `1.45.1`
 - **Release date**: 2026-08-12
 - **License**: Code/templates MIT · Whitepaper CC BY 4.0
 - **Author**: Wang Lijie (无敌哥), AI Governance Architect
+
+## v1.45.1: Host-tool identity passthrough at closure (T-149)
+
+- Fixes the tail of T-148 AC-004 (cross-tool identity): the host tool identity was not passed through to the token probe at closure, so `cost.token_measurement.host_tool` degraded to `other` and the token client was conflated with the project identity.
+- `change verify` now forwards `--host-tool` / `--token-client` end to end: `change_workflow.run_stage` → `evidence_workflow.finalize_evidence` → `telemetry_workflow.py`'s `collect_token_measurement`, so the per-task `host_tool` reflects the real caller (e.g. `codex`).
+- `evidence_workflow.finalize_evidence` gains `host_tool` / `token_clients` parameters; `_build_collector_command` injects `--host-tool` / `--token-client` into both the prepare and final-persist commands. Default behavior is unchanged when omitted, preserving backward compatibility.
+- 8 TDD tests cover entry passthrough, command injection, default compatibility, and closure chaining. `change verify --host-tool codex` closed with 243/243 tests green, a `VERIFIED` formal-verification chain, and `telemetry-T-149.json` reporting `host_tool=codex`, `source=measured:ocusage:codex` (real probe, not hardcoded).
 
 ## v1.45.0: Trustworthy cross-AI-tool telemetry and unavoidable closure
 
