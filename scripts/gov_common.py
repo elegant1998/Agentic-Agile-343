@@ -32,6 +32,22 @@ except ImportError:  # 允许仅使用 MD 解析能力的环境
 
 # ─── 契约发现 ──────────────────────────────────────────────
 
+class ContractConflictError(ValueError):
+    """同一任务存在多个契约格式，无法确定唯一事实源。"""
+
+
+def _reject_contract_conflicts(paths: list[Path]) -> None:
+    by_task: dict[str, list[Path]] = {}
+    for path in paths:
+        by_task.setdefault(extract_task_id(path), []).append(path)
+    conflicts = {task: files for task, files in by_task.items() if len(files) > 1}
+    if conflicts:
+        detail = "; ".join(
+            f"{task}: {', '.join(path.name for path in files)}"
+            for task, files in sorted(conflicts.items())
+        )
+        raise ContractConflictError(f"CONTRACT_FORMAT_CONFLICT: {detail}")
+
 def find_contracts(project_dir: Path) -> list[Path]:
     """发现所有契约文件（YAML + Markdown 双格式，去重排序）"""
     patterns = ["Intent_Contract_*.yaml", "Intent_Contract_*.yml", "Intent_Contract_*.md"]
@@ -40,17 +56,21 @@ def find_contracts(project_dir: Path) -> list[Path]:
     search_root = contracts_dir if contracts_dir.exists() else project_dir / "governance" / "contracts"
     for p in patterns:
         found.extend(search_root.glob(p))
-    return sorted(set(found))
+    result = sorted(set(found))
+    _reject_contract_conflicts(result)
+    return result
 
 
 def find_contract(project_dir: Path, task_id: str) -> Path | None:
-    """按任务 ID 定位契约（优先 YAML，回退 MD）"""
+    """按任务 ID 定位唯一契约；多格式并存时 fail closed。"""
     contracts_dir = project_dir / "governance" / "contracts"
-    for ext in (".yaml", ".yml", ".md"):
-        c = contracts_dir / f"Intent_Contract_{task_id}{ext}"
-        if c.exists():
-            return c
-    return None
+    found = [
+        contracts_dir / f"Intent_Contract_{task_id}{ext}"
+        for ext in (".yaml", ".yml", ".md")
+        if (contracts_dir / f"Intent_Contract_{task_id}{ext}").exists()
+    ]
+    _reject_contract_conflicts(found)
+    return found[0] if found else None
 
 
 def extract_task_id(filepath: Path) -> str:
@@ -150,6 +170,12 @@ def _extract_section(text: str, heading_keywords: tuple[str, ...]) -> str:
 def _parse_md_contract(path: Path) -> dict:
     text = path.read_text()
 
+    metadata: dict[str, str] = {}
+    for line in text.splitlines():
+        cols = _split_table_row(line) if line.strip().startswith("|") else []
+        if len(cols) >= 2 and cols[0] in {"创建日期", "签署日期", "日期", "Date", "Signed Date"}:
+            metadata[cols[0]] = cols[1]
+
     # goal：优先 "**目标**: xxx"，其次 "### 目标" / "## §1 目标" 章节首段
     goal = ""
     m = re.search(r"\*\*目标\*\*[：:]\s*(.+)", text)
@@ -202,6 +228,7 @@ def _parse_md_contract(path: Path) -> dict:
         "ac_texts": [a["desc"] for a in ac_list],
         "format": "md",
         "raw": text,
+        "metadata": metadata,
     }
 
 
@@ -211,7 +238,7 @@ def _parse_verify_column(cell: str) -> dict | None:
     支持前缀：
       shell: <命令>                    → {type: shell, command}
       http: <METHOD> <url> [expect N]  → {type: http, method, url, expect}
-      assert: <python 表达式>          → {type: assert, expr}
+      predicate: <安全谓词>           → {type: predicate, expression}
       db: <sql> [expect rows>=N]       → {type: db, sql, expect}
       manual / 其他                    → None（人工验证）
     """
@@ -224,9 +251,12 @@ def _parse_verify_column(cell: str) -> dict | None:
         expect = {"status": int(m.group(3))} if m.group(3) else {"status": 200}
         return {"type": "http", "method": (m.group(1) or "GET").upper(),
                 "url": m.group(2).strip("`"), "expect": expect}
+    m = re.match(r"^predicate:\s*(.+)$", s, re.IGNORECASE)
+    if m:
+        return {"type": "predicate", "expression": m.group(1).strip()}
     m = re.match(r"^assert:\s*(.+)$", s, re.IGNORECASE)
     if m:
-        return {"type": "assert", "expr": m.group(1).strip()}
+        return {"type": "assert", "expr": m.group(1).strip(), "legacy_unsafe": True}
     m = re.match(r"^db:\s*(.+)$", s, re.IGNORECASE)
     if m:
         return {"type": "db", "sql": m.group(1).strip()}

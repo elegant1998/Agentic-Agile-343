@@ -14,6 +14,7 @@ from pathlib import Path
 
 from project_snapshot import ProjectSnapshot
 from runtime_context import parse_test_output, resolve_test_plan, verification_context_checksum
+from token_usage import collect_token_measurement
 
 
 def _test_command(project):
@@ -40,6 +41,36 @@ def _execute_tests(project, command):
 
 def _context_path(governance, task_id):
     return governance / "telemetry/verification-runs" / f"{task_id}.json"
+
+
+def _token_baseline_path(governance, task_id):
+    return governance / "telemetry/token-baselines" / f"{task_id}.json"
+
+
+def capture_token_baseline(project_dir, task_id, host_tool=None, token_clients=None):
+    project = Path(project_dir).resolve()
+    measurement = collect_token_measurement(
+        project, host_tool=host_tool, token_clients=token_clients,
+    )
+    path = _token_baseline_path(project / "governance", task_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(measurement, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return measurement
+
+
+def collect_workflow_token_measurement(project, governance, task_id, host_tool=None, token_clients=None):
+    baseline_path = _token_baseline_path(governance, task_id)
+    try:
+        baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        baseline = None
+    return collect_token_measurement(
+        project, host_tool=host_tool, token_clients=token_clients, baseline=baseline,
+    )
+
+
+def _token_collector_args(measurement):
+    return ["--token-measurement-json", json.dumps(measurement, ensure_ascii=False)]
 
 
 def _load_context(path, project, task_id, command, source_digest):
@@ -102,7 +133,8 @@ def _progress(stage, status, started=None):
     print(json.dumps(event, ensure_ascii=False), file=sys.stderr, flush=True)
 
 
-def run(task_id, governance_dir, timeout=300, refresh_only=False, prepare_only=False):
+def run(task_id, governance_dir, timeout=300, refresh_only=False, prepare_only=False,
+        host_tool=None, token_clients=None):
     governance = Path(governance_dir).resolve()
     project = governance.parent
     if refresh_only:
@@ -111,10 +143,12 @@ def run(task_id, governance_dir, timeout=300, refresh_only=False, prepare_only=F
         context_path = _context_path(governance, task_id)
         context = json.loads(context_path.read_text(encoding="utf-8"))
         collector = Path(__file__).resolve().parent / "collect_telemetry.py"
+        token_measurement = collect_workflow_token_measurement(
+            project, governance, task_id, host_tool, token_clients)
         output = _run_collector(
             [sys.executable, str(collector), "--project", project.name, "--task", task_id,
              "--test-total", str(context.get("total", 0)), "--test-passed", str(context.get("passed", 0)),
-             "--token-usage", "0", "--token-source", "unavailable",
+             *_token_collector_args(token_measurement),
              "--skip-matrix-tests", "--skip-matrix-check", "--test-runner", str(context.get("runner") or "unknown"),
              "--verification-context", str(context_path),
              "--output", str(governance / "telemetry.json")],
@@ -168,10 +202,12 @@ def run(task_id, governance_dir, timeout=300, refresh_only=False, prepare_only=F
         })
         return {"task_id": task_id, "prepare_only": True, "tests": tests, "schedule": schedule}
     collector = Path(__file__).resolve().parent / "collect_telemetry.py"
+    token_measurement = collect_workflow_token_measurement(
+        project, governance, task_id, host_tool, token_clients)
     command = [
         sys.executable, str(collector), "--project", project.name, "--task", task_id,
         "--test-total", str(tests["total"]), "--test-passed", str(tests["passed"]),
-        "--token-usage", "0", "--token-source", "unavailable",
+        *_token_collector_args(token_measurement),
         "--skip-matrix-tests", "--test-runner", str(tests.get("runner") or "unknown"),
         "--verification-context", str(context_path),
         "--output", str(governance / "telemetry.json"),
@@ -201,9 +237,12 @@ def main():
     parser.add_argument("--timeout", type=int, default=300)
     parser.add_argument("--refresh-only", action="store_true")
     parser.add_argument("--prepare-only", action="store_true")
+    parser.add_argument("--host-tool", default=None)
+    parser.add_argument("--token-client", action="append", dest="token_clients")
     args = parser.parse_args()
     try:
-        result = run(args.task_id, args.governance_dir, args.timeout, args.refresh_only, args.prepare_only)
+        result = run(args.task_id, args.governance_dir, args.timeout, args.refresh_only,
+                     args.prepare_only, args.host_tool, args.token_clients)
     except (OSError, subprocess.TimeoutExpired, RuntimeError) as exc:
         print(json.dumps({"status": "BLOCKED", "error": str(exc)}, ensure_ascii=False), file=sys.stderr)
         return 2

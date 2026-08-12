@@ -73,11 +73,10 @@ ac:
         min_rows: 1
 
   - id: "AC-04"
-    desc: "业务逻辑校验（自定义断言）"
+    desc: "治理目录存在（安全谓词示例）"
     verify:
-      type: assert
-      expression: "your_validation_function()"
-      setup: "from tests.helpers import your_validation_function"
+      type: predicate
+      expression: "is_dir('governance')"
 
 # self_consistency 字段供 self_consistency_check.py 使用
 self_consistency:

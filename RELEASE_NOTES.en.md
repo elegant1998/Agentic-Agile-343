@@ -2,14 +2,79 @@
 
 > 🌐 中文版: [RELEASE_NOTES.md](RELEASE_NOTES.md)
 
-# Agentic Agile 3-4-3 Governance Framework · Open Source Edition v1.42.0
+# Agentic Agile 3-4-3 Governance Framework · Open Source Edition v1.45.0
 
 > **Calibrate first, then fight the bosses.** A complete, runnable governance framework for Agentic AI development — fully open source, no reservations. Let AI R&D governance be both offensive and defensive.
 
-- **Version**: `1.42.0`
+- **Version**: `1.45.0`
 - **Release date**: 2026-08-12
 - **License**: Code/templates MIT · Whitepaper CC BY 4.0
 - **Author**: Wang Lijie (无敌哥), AI Governance Architect
+
+## v1.45.0: Trustworthy cross-AI-tool telemetry and unavoidable closure
+
+- Telemetry records the host AI tool, token client, and stable project identity separately instead of conflating WorkBuddy, Codex, Claude Code, or other hosts with usage data sources.
+- Token usage follows a structured measurement contract. A project daily cumulative snapshot is baseline evidence only; task and project totals accept only same-client, same-project, same-day start/end deltas. Missing, ambiguous, or cross-day data remains `UNKNOWN/N/A`.
+- `change prepare` captures the token baseline. `change verify` chains Prove, Evidence, Telemetry, Intent Graph feedback, and the Closing Gate; any failure is `BLOCKED`, while success returns `CLOSED`.
+- The first failed formal Prove enters the append-only ledger. Harness recovery with `--task` records constraint failure, resolution, and reverification automatically, removing manual auto-heal counts.
+
+## v1.44.9: Governance verifier robustness fixes
+
+- Database contract queries close cursors and connections on both success and failure; a value-only expectation now fails when the query returns no rows.
+- Vitest/Jest pending tests are no longer reported as errors, and dotnet `Failed!` summaries retain passed, failed, and total counts.
+- Telemetry merging uses the normal module-level import; the Bug gate continues past damaged telemetry files while emitting an explicit diagnostic.
+
+## v1.44.8: Tool-independent local Node/npm discovery
+
+- When explicit configuration and PATH are unavailable, the Token tool bootstrap discovers common local runtimes from AI tools, nvm, fnm, Volta, Homebrew, and similar locations.
+- A candidate must provide sibling `node` and `npm` executables, with newer versions preferred; discovery still leads to one private installation that later runs reuse directly.
+
+## v1.44.7: ocusage 3.9 project telemetry protocol
+
+- Adapts to the current CLI by removing the retired `--project` option and selecting exact project Token metrics from JSON `byProject` data.
+
+## v1.44.6: Explicit Node launch for Token CLI
+
+- The Dashboard launches the private `cli.mjs` with a fixed absolute Node path, removing runtime PATH and `.bin` wrapper dependencies.
+
+## v1.44.5: Symlinked npm launcher fix
+
+- Preserves the directory of the configured npm entry point instead of resolving its symlink into npm internals, keeping the sibling Node executable available to `env node`.
+
+## v1.44.4: Private npm bootstrap PATH compatibility
+
+- When npm is provided through `AGENTIC_AGILE_NPM` or a non-standard location, its sibling Node directory is added to the installer subprocess PATH.
+- Fixes isolated Node environments where npm is discoverable but its `env node` launcher cannot start.
+
+## v1.44.3: One-time Token telemetry tool bootstrap
+
+- Installs `@geeeger/ocusage` once into `~/.agentic-agile-343/tools/ocusage`; later Dashboard runs reuse it without invoking npm.
+- Skill publication and Dashboard runtime share one bootstrap, repairing only a missing or damaged private tool.
+- Missing npm does not block publication or other telemetry, but now produces an explicit diagnostic instead of silent blank Token data.
+
+## v1.44.2: Stable runtime and Skill release pipeline
+
+- The Unix bootstrap wrapper no longer clears or deletes the persistent venv or upgrades pip; `_bootstrap.py` is the single lifecycle implementation.
+- Token measurement invokes an installed `ocusage` executable and no longer uses `npx --yes` for implicit package resolution or download.
+- Adds `skill_release.py` for one-command version updates and validation, atomic local installation from one release staging tree, and a validated public ZIP from that same tree.
+
+## v1.44.1: Persistent venv reuse performance fix
+
+- `_bootstrap.py` re-execs immediately when the target venv can already import PyYAML, without repeating `pip install`.
+- The Telemetry Harness shares the same health probe and cross-platform venv path, installing only when the dependency is first missing.
+- Regression tests lock down healthy-venv reuse without recreation or pip invocation.
+
+## v1.44.0: Single sources for governance contracts and test results
+
+- `gov_common.py` owns `.yaml/.yml/.md` discovery, task IDs, and normalized parsing; duplicate formats for one task fail closed.
+- Triangulation, Freshness, Crop, Verify Contract, and Self Consistency consume the same contract semantics.
+- Gate, Harness, and Telemetry use `runtime_context.parse_test_output()` for all eight supported runner families.
+
+## v1.43.0: Secure governance predicate execution
+
+- Replaces dynamic `eval/exec` governance checks with a side-effect-free AST allowlist predicate interpreter.
+- Legacy Python/assert/setup checks fail closed, with constraints templates and public guidance migrated.
+- Adds T-146 security regression coverage for malicious expressions, path traversal, and default predicates.
 
 ## v1.42.0: Map-first Recon and incremental long-history governance
 

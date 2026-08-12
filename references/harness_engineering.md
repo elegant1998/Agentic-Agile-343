@@ -66,8 +66,8 @@ constraints:
 ```
 
 每条约束包含：
-- `check`: 可执行检查。推荐 `check_type: command` 的 argv 数组或 `check_type: python`；Shell 检查必须显式声明 `posix` / `powershell` / `cmd` 方言，缺失时 fail closed。
-- `check_type`: 可选，设为 `python` 时 `check` 作为 Python 表达式执行（跨平台，可访问 `project_dir` 和 `Path`）
+- `check`: 可执行检查。推荐 `check_type: command` 的 argv 数组或 `check_type: predicate`；Shell 检查必须显式声明 `posix` / `powershell` / `cmd` 方言，缺失时 fail closed。
+- `check_type`: 设为 `predicate` 时只允许无副作用白名单函数，如 `is_file`、`is_dir`、`contains`、`all_files` 和 `python_syntax`。旧 `python` 类型会被安全阻断。
 - `watch_paths`: 关联文件列表（变更时触发检查），兼作约束生效范围（Scope）
 - `gate`: 所属门禁
 - `on_failure`: 执行策略 — `block`(阻断) / `warn`(告警) / `escalate`(暂停并提交 IO/OA 裁决) / `log`(仅记录)

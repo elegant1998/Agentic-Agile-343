@@ -116,6 +116,27 @@ def _read_json(path: Path, label: str) -> dict[str, Any]:
     return payload
 
 
+def _build_collector_command(project: Path, governance: Path, task_id: str,
+                             timeout_seconds: int, prepare_only: bool,
+                             host_tool: str | None, token_clients: list[str] | None) -> list[str]:
+    """Assemble the ``telemetry_workflow.py`` argv, threading host_tool / token_client.
+
+    Passing ``host_tool=None`` (the default) deliberately omits ``--host-tool`` so the
+    collector falls back to ``AGENTIC_AGILE_HOST_TOOL`` env or ``"other"`` — preserving
+    the v1.45.0 default behavior when the change entrypoint supplies nothing.
+    """
+    collector = Path(__file__).resolve().parent / "telemetry_workflow.py"
+    command = [sys.executable, str(collector), task_id, str(governance),
+               "--timeout", str(timeout_seconds)]
+    if host_tool:
+        command += ["--host-tool", host_tool]
+    for client in (token_clients or []):
+        command += ["--token-client", client]
+    if prepare_only:
+        command += ["--prepare-only"]
+    return command
+
+
 def _verify_outputs(project: Path, task_id: str, before: dict[Path, tuple[int, int, str] | None]) -> dict[str, str]:
     governance = project / "governance"
     run_path = governance / "telemetry" / "runs" / f"telemetry-{task_id}.json"
@@ -156,7 +177,8 @@ def _verify_outputs(project: Path, task_id: str, before: dict[Path, tuple[int, i
     }
 
 
-def finalize_evidence(project_dir: Path | str, task_id: str, timeout_seconds: int = 300) -> dict[str, Any]:
+def finalize_evidence(project_dir: Path | str, task_id: str, timeout_seconds: int = 300,
+                     host_tool: str | None = None, token_clients: list[str] | None = None) -> dict[str, Any]:
     project = Path(project_dir).resolve()
     task_id = _validate_task_id(task_id)
     if not project.is_dir():
@@ -189,8 +211,8 @@ def finalize_evidence(project_dir: Path | str, task_id: str, timeout_seconds: in
     collector = Path(__file__).resolve().parent / "telemetry_workflow.py"
     if not collector.is_file():
         raise FinalizeError(f"Python 遥测编排器不存在: {collector}")
-    command = [sys.executable, str(collector), task_id, str(governance), "--timeout", str(timeout_seconds)]
-    prepare_command = command + ["--prepare-only"]
+    command = _build_collector_command(project, governance, task_id, timeout_seconds, False, host_tool, token_clients)
+    prepare_command = _build_collector_command(project, governance, task_id, timeout_seconds, True, host_tool, token_clients)
     collector_started = time.monotonic()
     _progress("verification_prepare", "started")
     try:
@@ -253,9 +275,12 @@ def main() -> int:
     finalize.add_argument("--task", required=True)
     finalize.add_argument("--project-dir", default=".")
     finalize.add_argument("--timeout", type=int, default=300)
+    finalize.add_argument("--host-tool", default=None)
+    finalize.add_argument("--token-client", action="append", dest="token_clients", default=[])
     args = parser.parse_args()
     try:
-        result = finalize_evidence(args.project_dir, args.task, args.timeout)
+        result = finalize_evidence(args.project_dir, args.task, args.timeout,
+                                  args.host_tool, args.token_clients)
     except (ValueError, FinalizeError) as exc:
         print(json.dumps({"status": "BLOCKED", "error": str(exc)}, ensure_ascii=False), file=sys.stderr)
         return 2

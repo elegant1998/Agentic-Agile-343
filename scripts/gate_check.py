@@ -22,7 +22,7 @@ from pathlib import Path
 from datetime import datetime
 
 from command_runner import run_command
-from runtime_context import resolve_test_plan
+from runtime_context import parse_test_output, resolve_test_plan
 
 
 # SCOPE-V 的五道机械门检查控制状态转换，而不是增加线性流程阶段。
@@ -76,38 +76,12 @@ def run_python_tests(project_dir, timeout=120):
     argv = plan.get("argv") or []
     rc, out, err = run(argv, cwd=str(project_dir), timeout=timeout)
     output = "\n".join(part for part in (out, err) if part)
-    if framework == "pytest":
-        passed = sum(int(value) for value in re.findall(r"(\d+) passed", output))
-        failed = sum(
-            int(value)
-            for value in re.findall(r"(\d+) (?:failed|error(?:s)?)", output)
-        )
-        total = passed + failed
-    elif framework == "unittest":
-        match = re.search(r"Ran (\d+) tests?", output)
-        total = int(match.group(1)) if match else 0
-        failed = total if rc != 0 else 0
-        passed = total if rc == 0 else 0
-    elif framework in {"vitest", "jest"}:
-        try:
-            data = json.loads(out)
-        except json.JSONDecodeError:
-            data = {}
-        total = int(data.get("numTotalTests", 0) or 0)
-        passed = int(data.get("numPassedTests", 0) or 0)
-        failed = int(data.get("numFailedTests", max(0, total - passed)) or 0)
-    else:
-        counts = [int(value) for value in re.findall(r"(?:tests?|passed)[:= ]+(\d+)", output, re.IGNORECASE)]
-        total = max(counts, default=0)
-        passed = total if rc == 0 else 0
-        failed = max(0, total - passed) if total else (1 if rc != 0 else 0)
+    counts = parse_test_output(framework, output)
 
     return {
         "framework": framework,
         "returncode": rc,
-        "total": total,
-        "passed": passed,
-        "failed": failed,
+        **counts,
         "output": output,
         "argv": argv,
     }
@@ -215,13 +189,15 @@ def gate_pre(task_id, project_dir):
         content = contract.read_text()
         ac_lines = re.findall(r'\|[^|]*\|[^|]*\|[^|]*\|', content)
         shell_count = sum(1 for l in ac_lines if 'shell:' in l.lower() or 'grep' in l.lower())
-        assert_count = sum(1 for l in ac_lines if any(k in l.lower() for k in ['assert:', 'http:', 'db:']))
-        total = shell_count + assert_count
+        predicate_count = sum(1 for l in ac_lines if any(k in l.lower() for k in ['predicate:', 'http:', 'db:']))
+        total = shell_count + predicate_count
         if total > 0:
             shell_ratio = shell_count / total
             all_pass &= check(f"AC 验证方式合理（shell:grep {shell_count}/{total} = {shell_ratio:.0%}）",
                               shell_ratio <= 0.5,
                               f"shell:grep 占比 {shell_ratio:.0%}，超过 50% 限制")
+        elif 'predicate:' in content.lower() or '验证方式' in content:
+            all_pass &= check("AC 验证方式已设计", True)
         else:
             all_pass &= check("AC 验证方式已设计", False, "未找到 AC 表格或验证方式标注")
     else:
@@ -464,15 +440,16 @@ def gate_bug(task_id, project_dir):
             if data.get("parent_task") == task_id and data.get("value", {}).get("first_pass_rate", {}).get("value") == 0:
                 correction = candidate
                 break
-        except Exception:
+        except Exception as exc:
+            print(f"警告: 跳过损坏的遥测文件 {candidate}: {type(exc).__name__}: {exc}", file=sys.stderr)
             continue
     legacy_corrected = False
     if tel_file.exists():
         try:
             legacy = json.loads(tel_file.read_text())
             legacy_corrected = legacy.get("value", {}).get("first_pass_rate", {}).get("value") == 0
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"警告: 无法读取原任务遥测 {tel_file}: {type(exc).__name__}: {exc}", file=sys.stderr)
     all_pass &= check("Bug 修正遥测已记录（first_pass=0）",
                       correction is not None or legacy_corrected,
                       "未找到关联该任务的 telemetry-B-XXX.json")

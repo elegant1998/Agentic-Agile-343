@@ -3,7 +3,7 @@ name: agentic-agile-343
 description: "Agentic-Agile-343，让 AI 研发治理进可攻退可守。用户说既有项目先看看、风险评估或初始化治理、门禁误报、分析文件影响范围、本次只允许修改某些文件、没有测试先固定现有行为、修改已有功能、报告 Bug/缺陷/回归并要求修复、设计多层验证、生成证据包并完成任务，或准备发布、生成发布清单、检查制品和证据是否一致、记录已发布/回滚时使用。提供 3-4-3、Recon、安全变更、Verification Plan、Evidence 遥测收口、Release Manifest、TDD、证据与遥测闭环。Use for existing-project governance, safe changes, bug/regression repair, risk-driven verification, evidence-to-telemetry finalization, proof-carrying release readiness, artifact/evidence binding, and release/rollback fact recording."
 metadata:
   display_name: "Agentic Agile 343"
-  version: "1.42.0"
+  version: "1.45.0"
   author: "王立杰-无敌哥"
   created: "2025-07-20"
 ---
@@ -61,8 +61,9 @@ metadata:
 | Unix 兼容包装器 | `scripts/quick_telemetry.sh` | 仅转发到 Python 主流程，不承载度量逻辑 |
 | **Evidence 遥测收口** | `scripts/evidence_workflow.py` | **Evidence 完成后调用 Python 遥测主流程；指标由 tracker/collector 事实派生（v1.36）** |
 | **门禁验证器** | `scripts/gate_check.py` | **SCOPE-V 5 个检查门的机械验证器：前置/编码/验证/收尾/Bug回溯（v1.20）** |
-| **Token 实测** | `scripts/token_usage.py` + `scripts/fetch_token_usage.sh` | **Python 主实现跨平台探测 ocusage；`.sh` 仅作 Unix 包装，缺失返回 UNKNOWN/UNAVAILABLE 不伪造估算（v1.36）** |
-| **依赖自举** | `scripts/_bootstrap.py` + `scripts/ensure_py_env.sh` | **Python 原生自包含依赖 bootstrap：首次运行自动建 venv + 装 pyyaml；`.sh` 仅作 Unix 兼容入口（v1.36）** |
+| **Token 实测** | `scripts/token_usage.py` + `scripts/tool_bootstrap.py` | **首次安装到 Skill 私有工具目录，后续直接复用；缺 npm 时明确降级（v1.44.3）** |
+| **依赖自举** | `scripts/_bootstrap.py` + `scripts/ensure_py_env.sh` | **Python 原生自包含依赖 bootstrap：首次缺失时自动建 venv + 装 pyyaml；后续探测健康即直接复用，不再执行 pip（v1.44.1）** |
+| **Skill 发布** | `scripts/skill_release.py` | **一条命令机械升版并校验；单次 staging 同时驱动本地原子安装与对外 ZIP（v1.44.2）** |
 | 代码上下文发现 | `scripts/discover_context.py` | AST 解析自动发现 API 端点、模型、依赖 |
 | **轻量 Recon** | `scripts/recon.py` | **既有项目只读侦察；可选消费 IWE Document Map 与 codebase-memory-mcp Code Map，缺失时保持 L0** |
 | **Context Provider** | `scripts/context_providers.py` | **统一能力探测、制品归一化、新鲜度检查与需求—代码—测试 Trace Link（v1.37）** |
@@ -82,14 +83,14 @@ metadata:
 | 反思+反哺 | `scripts/reflect.py` | LOOP-2/3: 生成反思日志 + 反哺意图图谱 |
 | **Graph 引擎** | `scripts/graph_engine.py` | **DAG 引擎（含 reschedule + timeouts 命令）** |
 | **工具审计器** | `scripts/audit_tools.py` | **审计 AS 工具调用合规性（白名单/权限/边界）** |
-| **契约验证器** | `scripts/verify_contract.py` | **逐条执行 AC 验收标准（shell/http/db/assert，支持 MD+YAML 契约）** |
+| **契约验证器** | `scripts/verify_contract.py` | **逐条执行 AC 验收标准（shell/http/db/predicate，支持 MD+YAML+YML 契约）** |
 | **证据包审计** | `scripts/audit_evidence.py` | **按约束 ID 检查证据包覆盖度（支持 EB-T-XXX 拆分模式）** |
 | **三方一致性** | `scripts/verify_triangulation.py` | **图谱↔契约↔约束交叉一致性验证** |
 | **回滚安全验证** | `scripts/verify_rollback_safety.py` | **DAG 回滚前安全性分析（下游/数据/并行组）** |
 | **时间窗口验证** | `scripts/verify_freshness.py` | **工件时效检测（已完成任务自动豁免）** |
 | **跨模块契约验证** | `scripts/verify_cross_module.py` | **验证跨模块接口契约（XC）可达性 + SLA + 破坏性变更** |
 | **证据聚合器** | `scripts/aggregate_evidence.py` | **多模块证据包聚合 + 遥测合并 → 发布证据包** |
-| **共享解析库** | `scripts/gov_common.py` | **契约/证据包/图谱统一发现与解析（MD+YAML 双格式），被各验证脚本复用** |
+| **共享解析库** | `scripts/gov_common.py` | **统一发现与解析 MD/YAML/YML 契约，同任务多格式冲突 fail closed** |
 | **Loop Memory 模板** | `templates/Template_Loop_Memory.yaml` | **跨 cycle 统一状态文件（进度 + 教训 + 模式 + 决策）** |
 | **Recon 基线模板** | `templates/Template_Recon_Baseline.md` | **既有项目的事实、保留项、未知项与变更围栏** |
 | **Change Envelope** | `templates/Template_Change_Envelope.yaml` | **限定本轮允许和禁止修改的范围** |
@@ -130,7 +131,9 @@ metadata:
 
 > **治理运行时统一计划（v1.41.0）**：Gate、Harness、Telemetry 共用唯一 `TestExecutionPlan`，Verification Run Context 绑定实际 argv、源码摘要与校验和；`nfr:test_run` 收到可信 context 时只验证快照，不再重跑测试。单次工作流通过 `ProjectSnapshot` 复用 revision、文件清单和源码摘要；Harness NFR 共用源码清单与内容缓存，Crop Context 只构建一次地图并在进程内发现代码上下文。调度输出 test/scan/digest/map/harness/collector/persist 的执行或复用事实，失效数据仍 fail closed。
 
-> **规模化 Map-first 与增量治理（v1.42.0）**：Provider 构建和查询具备条目、Token、字节与超时预算，禁止 IWE `--limit 0` 和无界 Code Map 图查询。Task Recon 优先只确认地图返回的有界候选；无可用地图时至多执行一次有界 `rg` 回退，并排除 `.iwe`、`.codebase-memory`、依赖与构建缓存。执行事件使用可从 JSONL 重建的 SQLite 侧索引，项目遥测把聚合原始事实固化进稳定 run 摘要；Evidence finalize 只执行一次最终 Telemetry/Dashboard 持久化。
+> **安全执行与共享解析（v1.44.0）**：Provider 查询与 Task Recon 保持有界。治理检查只接受无副作用 AST 白名单谓词，旧任意 Python 断言 fail closed。`.yaml/.yml/.md` 契约由 `gov_common.py` 统一发现与解析，同任务多格式冲突显式阻断；Gate、Harness 与 Telemetry 共用 `runtime_context.py` 的测试输出计数。
+
+> **跨工具可信遥测与不可旁路收口（v1.45.0）**：宿主 AI 工具、Token 客户端与项目身份分别记录，不依赖 WorkBuddy 或任何单一 AI 工具。项目日累计 Token 只可作为任务起止基线；仅同客户端、同项目、同自然日差值进入任务聚合，缺测或歧义保持 `UNKNOWN/N/A`。`change prepare` 自动捕获基线；`change verify` 必须连续执行 Prove、Evidence、Telemetry、Intent Graph 反馈与 Closing Gate，成功直接返回 `CLOSED`。Harness `recover --task T-XXX` 自动追加失败、恢复、复验事件链。
 
 > **正式验证事实链（v1.39.0）**：Evidence/Telemetry 收口后由工作流代码追加 `formal_verification` 事件，结果严格为 `VERIFIED`、`CONDITIONAL` 或 `BLOCKED`。首次 `CONDITIONAL` 后续转 `VERIFIED` 不计首次成功；无正式事件时 `first_pass_rate` 为 UNKNOWN。`must_total=0` 输出 `NOT_APPLICABLE/N/A`，不显示虚假的 100%。
 
@@ -200,14 +203,14 @@ cp docs/architecture.md /path/to/project/docs/architecture.md  # 如有模板
 | 工件 | 路径 | 说明 |
 |------|------|------|
 | 意图图谱 | `governance/Intent_Graph.md` | 单文件，会话级 |
-| 意图契约 | `governance/contracts/Intent_Contract_T-XXX.md`（或 `.yaml`） | **每任务一份**，MD/YAML 双格式均可 |
+| 意图契约 | `governance/contracts/Intent_Contract_T-XXX.md`（或 `.yaml/.yml`） | **每任务一份**；同一任务不得多格式并存 |
 | 证据包 | `governance/evidence/EB-T-XXX.md` | **每任务一份**，与契约任务 ID 对应 |
 | 约束矩阵 | `governance/constraints.yaml`（可执行版）+ `Constraint_Matrix.md`（人类可读版） | YAML 供 harness 引擎，MD 供 IO 审阅 |
 
 **契约格式选择指引**：
-- **MD 契约（推荐起步）**：人类可读性好，Grill-Me 决策确认 + **IO 显式签署**流程自然；AC 表格的"验证方式"列支持 `shell:`/`http:`/`assert:`/`db:` 前缀实现自动化验证（写自然语言则视为人工验证项）
+- **MD 契约（推荐起步）**：人类可读性好，Grill-Me 决策确认 + **IO 显式签署**流程自然；AC 表格的"验证方式"列支持 `shell:`/`http:`/`predicate:`/`db:` 前缀实现自动化验证（写自然语言则视为人工验证项）
 - **YAML 契约（精简进阶）**：体积约为 MD 的 30%，适合上下文敏感的 AS 任务注入；支持 `self_consistency`、`depends_on` 等结构化字段
-- 两种格式可混用，所有脚本（verify_contract / crop_context / verify_triangulation / self_consistency_check / verify_freshness）自动识别
+- 项目可按任务选择任一格式；所有公开入口统一识别 `.md/.yaml/.yml`，同任务多格式冲突时明确阻断
 
 **MD 契约的自洽性配置**：MD 契约如需启用 `self_consistency_check.py`，在契约中加一个围栏块：
 ````markdown
@@ -353,11 +356,12 @@ L1 意图图谱（OA 会话级）→ L2 全局约束（共享）→ L2+ AI 编�
 - **🔴 证据包强制（v1.18）**：任一功能任务 Verify 完成后，必须生成 Evidence_Bundle（至少包含 AC 验证结果 + 约束检查结果 + 遥测摘要），不得跳过。未生成证据包时任务不得标记为"已完成"，与 v1.12 遥测规则共同构成 Verify 收尾双门
 - **🔴 意图图谱回写（v1.18）**：任务完成后必须回写意图图谱：(a) 新增模块/能力节点 (b) 遇到的教训 (c) 下一步迭代方向。跳过回写视为 Evolve 阶段未完成，任务不得关闭
 - **🔴 遥测结果验证（v1.19）**：收尾门的遥测检查不只是"是否运行了脚本"，必须验证三件事：(a) `telemetry/runs/telemetry-T-XXX.json` 单任务文件存在 (b) `telemetry.json` 的 `meta.run_count` 比运行前增加 (c) `dashboard.html` 修改时间已更新。推荐使用 `quick_telemetry.sh` 一键完成
-- **🔴 TDD 强制（v1.20）**：Orchestrate 阶段必须先写测试（Red），再写实现（Green），再重构（Refactor）。编码门检查"测试已先写且运行 RED"；验证门检查"测试 GREEN + AC 逐条验证通过 + test-total > 0"。AC 验证方式为 `shell:grep` 的条目不得超过总 AC 的 50%，至少一半必须用 `assert:`/`http:`/`db:` 运行时验证
+- **🔴 TDD 强制（v1.20）**：Orchestrate 阶段必须先写测试（Red），再写实现（Green），再重构（Refactor）。编码门检查"测试已先写且运行 RED"；验证门检查"测试 GREEN + AC 逐条验证通过 + test-total > 0"。AC 验证方式为 `shell:grep` 的条目不得超过总 AC 的 50%，至少一半必须用 `predicate:`/`http:`/`db:` 运行时验证
 - **🔴 遥测数据真实性（v1.20）**：collect_telemetry.py 的 `--test-total`/`--test-passed` 参数不得手工编造。必须先运行 `npx vitest run`（Node 项目）或 `pytest`（Python 项目）获取真实测试数，再将结果传入。若项目无测试套件，`--test-total` 传 0 并在证据包中标注"TDD 缺口"
 - **🔴 Bug 回溯（v1.20）**：任一任务标记"已完成"后发现的 bug，必须：(a) 归属到对应契约 T-XXX（b）重新采集该任务遥测（`--tasks-first-pass 0 --auto-healed 1`）（c）在证据包追加"事后 bug 记录"段（d）回写意图图谱教训。跳过回溯视为该任务首次成功率数据虚假
-- **🔴 Token 用量实测（v1.21）**：`--token-usage` 不得人工估算。优先通过 `scripts/fetch_token_usage.sh <项目名> [日期] [客户端]` 调用 `@geeeger/ocusage` 从 AI 客户端（workbuddy/claude/codex/opencode 等）本地数据实测；`quick_telemetry.sh` 已自动集成（环境变量 `OCUSAGE_CLIENT`/`OCUSAGE_DATE` 可覆盖）。实测成功时 `cost.token_source` 标记为 `measured:ocusage:*`，dashboard 显示"● 实测"绿色徽标；仅当 ocusage 不可用（未安装/无数据）时才允许回退估算并标记 `estimated`。前置条件：`@geeeger/ocusage` 由 `fetch_token_usage.sh` 自动检测，缺失时自动 `npm i -g` 安装（需 node ≥ 22.5），无需用户手动安装
-- **🔴 依赖自包含（v1.22，v1.36 更新）**：skill 所有运行时依赖必须自包含、开箱即用——新用户安装 skill 后**无需手动装依赖**即可运行全部脚本。Python 侧：所有脚本的 `import yaml` 失败会自动触发 `_bootstrap.ensure_yaml_available()`，用 `sys.executable -m venv` 创建/复用持久 venv（Windows: `Scripts/python.exe`；Unix: `bin/python`），再用 `python -m pip install pyyaml` 安装并安全 re-exec。Shell 脚本只作 Unix 兼容包装，不承载唯一业务逻辑。Token 侧由 `token_usage.py` 跨平台探测 `npx/@geeeger/ocusage`；不可用时返回 `UNAVAILABLE_OPTIONAL_TOOL`/UNKNOWN，不得伪造估算。
+- **🔴 Token 用量实测（v1.21，v1.45.0 更新）**：`--token-usage` 不得人工估算。Skill 发布安装与 Dashboard 运行时共用 `tool_bootstrap.py`：首次将 `@geeeger/ocusage` 安装到 `~/.agentic-agile-343/tools/ocusage`，后续检测到私有可执行文件即直接复用，不再调用 npm。宿主工具通过 `AGENTIC_AGILE_HOST_TOOL`/`--host-tool` 标识，Token 客户端通过 `AGENTIC_AGILE_TOKEN_CLIENT`/`--token-client` 独立选择；累计快照不得冒充任务用量。禁止全局安装和 `npx --yes`；npm 不可用、项目匹配歧义或基线不兼容时保持 UNKNOWN/N/A。
+- **🔴 依赖自包含（v1.22，v1.44.2 更新）**：skill 所有必需运行时依赖必须自包含。Python 侧仅当持久 venv 无法 `import yaml` 时执行一次安装；健康环境禁止重建、清空、升级 pip 或重复安装。`ensure_py_env.sh` 只能转发到 Python 原生 bootstrap，不得维护第二套生命周期逻辑。可选工具不得在正式工作流中隐式下载。
+- **🔴 Skill 发布单一流水线（v1.44.2）**：版本字段必须由 `skill_release.py version` 单命令更新并校验，禁止手工逐文件补丁。发布只构建一次已排除私有目录的 staging；本地 Skill 从该 staging 原子替换，对外 ZIP 从同一 staging 生成并执行完整性校验，本地安装不得解压 ZIP。
 - **🔴 显式签署·禁代签（v1.23）**：Grill-Me 决策确认**不等于**契约签署（sign-off）。OA 不得自行在契约中写入 `SIGNED`、IO 署名或"自动签署"标记；签署区 `IO（意图主理人）` 一行必须由 IO 本人填写并明确确认（回复「签署」或署名）。签署前不得创建业务代码（与 v1.18 契约前置一致）。`gate_check.py --gate pre` 会扫描"自动签署 / 代签 / OA 代"等标记并直接判失败，签署区缺失或 IO 未署名同样失败。
 - **🔴 签署检测否定语境修复（v1.23.1）**：`gate_check.py` 的代签扫描不得裸匹配子串。当"OA 代 / 代 OA / 自动签署"等标记出现在**否定语境**（同一行含 非/禁止/不得/无/不/未/并非/not/no）时——如"**非 OA 代签**""**禁止 OA 代签**"——属反代签的正向说明，必须**放行**而非误报失败。避免 IA 为规避误报而被迫改写合法签署措辞。
 - **🔴 C-QUAL-01 模板修正（v1.23.1）**：`Template_Constraints.yaml` 中 Node/vitest 项目的 check 不再写 `--coverage-reporter=json-summary`（vitest v2 不识别连字符写法）。正确写法为 `npx vitest run --coverage`，覆盖率阈值与 json-summary 在 `vitest.config` 的 `test.coverage` 配置；点号写法 `--coverage.reporter=json-summary` 亦可。否则命令报错会导致 C-QUAL-01 门禁**误判失败**。
@@ -372,7 +376,7 @@ L1 意图图谱（OA 会话级）→ L2 全局约束（共享）→ L2+ AI 编�
 - **🔴 Change Envelope 门禁（v1.27.1）**：存在正式 `governance/Change_Envelope.yaml` 时，prove 门必须检查 staged、unstaged、untracked、删除与 rename 的新旧路径。只有 task 匹配、状态 AUTHORIZED、allowed 非空且 Unknown 为空的围栏有效；protected 优先，任何越界或解析失败均阻断。禁止自动授权、自动扩围或提供跳过参数。
 - **🔴 Preserve 特征基线（v1.28.0）**：Agent 不得自动发明既有行为。只有 IO confirmed 或 existing test 来源、AUTHORIZED、Unknown 为空的基线可 capture；命令必须为参数数组且 shell=False。CAPTURED 基线存在时 prove 门强制复验，CHANGED/UNVERIFIABLE 均阻断；SAME 不替代新需求 AC。
 - **🔴 维护兼容修复（v1.28.1）**：`quick_telemetry.sh` 必须识别纯 unittest 项目的真实测试总数与通过数；新增 YAML 消费工具必须复用 `_bootstrap.ensure_yaml_available()`，不得在首次缺少 PyYAML 时破坏自包含承诺。
-- **🔴 安全变更统一入口（v1.29.0，v1.36.2 收口串联）**：`cli.py change` 仅负责编排现有能力，不得复制或弱化下层门禁。计划默认 dry-run、apply 不覆盖；状态必须从当前工件重算，不信任自报；禁止自动签署、自动授权围栏、自动决定 Preserve 或运行实现命令。`change verify` 在 Prove gate 通过后必须由代码直接调用 `evidence finalize`；若 Evidence、Telemetry 或 Dashboard 收口失败，`change verify` 必须 BLOCKED。
+- **🔴 安全变更统一入口（v1.29.0，v1.45.0 收口串联）**：`cli.py change` 仅负责编排现有能力，不得复制或弱化下层门禁。计划默认 dry-run、apply 不覆盖；状态必须从当前工件重算，不信任自报；禁止自动签署、自动授权围栏、自动决定 Preserve 或运行实现命令。`change verify` 在 Prove gate 通过后必须连续完成 `evidence finalize`、Intent Graph 反馈和 Closing Gate；若任一步失败必须 BLOCKED，全部成功才返回 CLOSED。
 - **🔴 自然语言能力路由（v1.32.0）**：v1.25—v1.32 能力统一增加 `RELEASE_MANIFEST` 路由。用户不需要治理编号或 CLI；准备发布、制品证据绑定、记录已发布和回滚事实必须进入发布清单，且不得把自然语言请求当成发布授权。
 - **🔴 Bug 修复入口（v1.30.3）**：自然语言“这是一个 Bug……请修复”即可触发候选调查；用户无需提供 B/T 编号或运行 CLI。Agent 自动发现父任务与下一个 B-ID，但证据不唯一时必须只追问一个关键问题，禁止猜测。B-XXX 必须关联已签署父契约及其不可变收尾证据；只有 implementation_regression 可进入 BUG_FIX。状态严格按 REPORTED→CLASSIFIED→RED→VERIFIED→CLOSED 推进；修复验证后先用 `bug telemetry` 独立记录 first_pass=0，再由 bug gate 关闭，原任务遥测不得覆写。
 - **🔴 多层验证与无效全绿（v1.31.0）**：Verification Plan 按 proof obligation 与风险选择必要层级，不默认堆满测试。DRAFT 不得自动授权；正式计划存在时 prove 门强制检查项目内、可解析、任务匹配且未过期的证据。缺少 required layer、实际独立性不足、同一来源复制改名、关键结论仅靠 LLM-as-Judge、HUMAN_ACCEPTANCE 由 AI/OA 代签，或 UNKNOWN/CONDITIONAL/ESCALATED 被压成绿色，均禁止 PASS。

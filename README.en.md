@@ -1,6 +1,8 @@
-# Agentic Agile 3-4-3 Governance Framework · Open Source Edition v1.42.0
+# Agentic Agile 3-4-3 Governance Framework · Open Source Edition v1.45.0
 
 > 🌐 中文版: [README.md](README.md)
+
+Telemetry is independent of the host AI tool. `AGENTIC_AGILE_HOST_TOOL` identifies the host while `AGENTIC_AGILE_TOKEN_CLIENT` selects the usage client. Project daily cumulative tokens are baseline evidence only; task totals require a same-client, same-project, same-day delta, otherwise they remain `N/A`.
 
 > **Calibrate first, then fight the bosses.** This is a **complete, runnable governance framework** for Agentic AI development — from Intent Contract to evidence closure, from constraint gates to telemetry dashboards, fully open source and ready to use out of the box. Let AI R&D governance be both offensive and defensive.
 
@@ -131,8 +133,14 @@ python scripts/cli.py list
 ```
 
 When PyYAML is missing, YAML-consuming scripts use the Python-native
-`_bootstrap.py` path to create or reuse `~/.agentic-agile-343/venv` and install
-the dependency. Windows, macOS, and Linux share the same implementation.
+`_bootstrap.py` path to create or reuse `~/.agentic-agile-343/venv`. The
+dependency is installed only when absent; subsequent healthy runs reuse the
+environment without invoking pip. Windows, macOS, and Linux share the same implementation.
+
+The Dashboard's `ocusage` dependency is installed once into
+`~/.agentic-agile-343/tools/ocusage` during Skill publication and then reused.
+When npm is not on PATH, common local Node/npm runtimes are discovered automatically;
+you can also install Node.js/npm or set `AGENTIC_AGILE_NPM` explicitly.
 
 ### 2. Initialize project governance (solo)
 

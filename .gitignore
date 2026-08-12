@@ -14,3 +14,8 @@ assets/dashboard.html
 # Team-mode local map fallback; CI-authoritative snapshots use the parent directory.
 governance/recon/.local/
 docs/关于codebase-memory-mcp和iwe双地图的构建与git 管理规则.md
+dist/
+.workbuddy/memory/2026-08-12.md
+公众号文章-四大治理工件.md
+公众号文章-四大治理工件.md
+公众号文章-四大治理工件.md

@@ -23,51 +23,21 @@ import sys
 from pathlib import Path
 from collections import defaultdict
 
+from gov_common import (
+    ContractConflictError,
+    extract_task_id,
+    find_constraints,
+    find_contracts,
+    find_graph,
+    parse_contract,
+)
+
 try:
     import yaml
 except ImportError:
     from _bootstrap import ensure_yaml_available
     ensure_yaml_available()
     import yaml
-
-
-# ─── 文件发现 ──────────────────────────────────────────────
-
-def find_graph(project_dir: Path) -> Path | None:
-    candidates = [
-        project_dir / "governance" / "Intent_Graph.md",
-        project_dir / "docs" / "Intent_Graph.md",
-        project_dir / "Intent_Graph.md",
-    ]
-    for c in candidates:
-        if c.exists():
-            return c
-    return None
-
-
-def find_constraints(project_dir: Path) -> Path | None:
-    candidates = [
-        project_dir / "governance" / "constraints.yaml",
-        project_dir / "constraints.yaml",
-    ]
-    for c in candidates:
-        if c.exists():
-            return c
-    return None
-
-
-def find_contracts(project_dir: Path) -> list[Path]:
-    """查找契约文件（支持 YAML 和 Markdown 两种格式）"""
-    patterns = ["Intent_Contract_*.yaml", "Intent_Contract_*.md"]
-    found: list[Path] = []
-    contracts_dir = project_dir / "governance" / "contracts"
-    if contracts_dir.exists():
-        for p in patterns:
-            found.extend(contracts_dir.glob(p))
-    else:
-        for p in patterns:
-            found.extend(project_dir.glob(f"governance/contracts/{p}"))
-    return sorted(set(found))
 
 
 # ─── 解析 ──────────────────────────────────────────────────
@@ -156,84 +126,14 @@ def extract_must_constraints(constraints_data: dict) -> list[dict]:
 
 
 def extract_contract_goals(contract_path: Path) -> dict:
-    """从契约提取 goal + domain（自动识别 YAML / Markdown 格式）"""
-    if contract_path.suffix in (".yaml", ".yml"):
-        with open(contract_path) as f:
-            data = yaml.safe_load(f)
-
-        return {
-            "task": _extract_task_id(contract_path),
-            "goal": data.get("goal", ""),
-            "not_goal": data.get("not_goal", ""),
-            "domain": data.get("domain", ""),
-            "ac_count": len(data.get("ac", [])),
-            "ac_texts": [ac.get("desc", "") for ac in data.get("ac", [])],
-            "db_tables": data.get("db_tables", []),
-        }
-
-    # Markdown 契约：从文本结构中提取
-    return _extract_from_markdown_contract(contract_path)
-
-
-def _extract_from_markdown_contract(path: Path) -> dict:
-    """从 Markdown 契约中提取 goal / domain / AC 描述列表
-
-    支持的格式（Template_Intent_Contract.md 及其变体）：
-    - goal:    `### 目标` 或 `## §1 目标` 或 `**目标**: xxx`
-    - domain:  `**关联图谱**: ... §2.4 BRAND 域` 中的大写域 ID
-    - ac:      `| AC-01 | 描述 |` 或 `| AC-01 | 描述 | 验证 |` 表格行
-    """
-    text = path.read_text()
-
-    # ── goal ──
-    goal = ""
-    m = re.search(r'\*\*目标\*\*[：:]\s*(.+)', text)
-    if m:
-        goal = m.group(1).strip()
-    else:
-        # 匹配 "### 目标" / "## §1 目标" / "## 1. 目标" 等标题下的首段
-        m = re.search(
-            r'#{2,3}\s*(?:§\d+\s*)?(?:\d+\.?\s*)?(?:背景与)?目标[^\n]*\n+([^#\n].+)',
-            text,
-        )
-        if m:
-            goal = m.group(1).strip()
-
-    # ── domain ──
-    domain = ""
-    m = re.search(r'\*\*关联域\*\*[：:]\s*(.+)', text)
-    if m:
-        domain = m.group(1).strip()
-    else:
-        # 从 "§2.4 BRAND 域" / "MEMBER, BRAND" 等引用中提取大写域 ID
-        m = re.search(r'关联图谱[^\n]*?((?:[A-Z][A-Z_]{2,})(?:\s*[,，、]\s*[A-Z][A-Z_]{2,})*)\s*域', text)
-        if m:
-            domain = m.group(1).strip()
-
-    # ── AC 描述 ──
-    ac_texts: list[str] = []
-    for line in text.split('\n'):
-        s = line.strip()
-        if not s.startswith('|') or '---' in s:
-            continue
-        cols = [c.strip() for c in s.split('|') if c.strip()]
-        if len(cols) >= 2 and re.match(r'^AC-\d+', cols[0]):
-            ac_texts.append(cols[1])
-
+    """为三方校验补充计数字段，其余语义全部来自 gov_common。"""
+    parsed = parse_contract(contract_path)
+    raw = parsed.get("raw")
     return {
-        "task": _extract_task_id(path),
-        "goal": goal,
-        "not_goal": "",
-        "domain": domain,
-        "ac_count": len(ac_texts),
-        "ac_texts": ac_texts,
-        "db_tables": [],
+        **{key: parsed[key] for key in ("task", "goal", "not_goal", "domain", "ac_texts")},
+        "ac_count": len(parsed.get("ac", [])),
+        "db_tables": raw.get("db_tables", []) if isinstance(raw, dict) else [],
     }
-
-
-def _extract_task_id(filepath: Path) -> str:
-    m = re.search(r"Intent_Contract_(.+?)\.(?:yaml|yml|md)$", filepath.name)
-    return m.group(1) if m else filepath.stem
 
 
 def find_task_nodes_in_graph(graph_text: str) -> dict[str, str]:
@@ -630,7 +530,12 @@ def triangulate(project_dir: Path) -> dict:
     # 加载工件
     graph_file = find_graph(project_dir)
     constraints_file = find_constraints(project_dir)
-    contract_files = find_contracts(project_dir)
+    try:
+        contract_files = find_contracts(project_dir)
+    except ContractConflictError as exc:
+        result["status"] = "FAIL"
+        result["issues"].append({"severity": "ERROR", "detail": str(exc)})
+        return result
 
     if not graph_file:
         result["issues"].append({"severity": "WARN", "detail": "未找到意图图谱"})

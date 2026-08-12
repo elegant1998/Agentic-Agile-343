@@ -36,44 +36,23 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from collections import defaultdict
 
+from gov_common import (
+    ContractConflictError,
+    extract_task_id,
+    find_constraints,
+    find_contract,
+    find_contracts,
+    find_graph,
+    is_task_completed,
+    parse_contract,
+)
+
 try:
     import yaml
 except ImportError:
     from _bootstrap import ensure_yaml_available
     ensure_yaml_available()
     import yaml
-
-
-# ─── 文件发现 ──────────────────────────────────────────────
-
-def find_contracts(project_dir: Path) -> list[Path]:
-    contracts_dir = project_dir / "governance" / "contracts"
-    if contracts_dir.exists():
-        return sorted(contracts_dir.glob("Intent_Contract_*.*"))
-    return sorted(project_dir.glob("governance/contracts/Intent_Contract_*.*"))
-
-
-def find_graph(project_dir: Path) -> Path | None:
-    candidates = [
-        project_dir / "governance" / "Intent_Graph.md",
-        project_dir / "docs" / "Intent_Graph.md",
-        project_dir / "Intent_Graph.md",
-    ]
-    for c in candidates:
-        if c.exists():
-            return c
-    return None
-
-
-def find_constraints(project_dir: Path) -> Path | None:
-    candidates = [
-        project_dir / "governance" / "constraints.yaml",
-        project_dir / "constraints.yaml",
-    ]
-    for c in candidates:
-        if c.exists():
-            return c
-    return None
 
 
 def find_evidence(project_dir: Path) -> list[Path]:
@@ -110,14 +89,19 @@ def extract_signed_date(contract_path: Path) -> datetime | None:
     """从契约文件中提取签署日期"""
     content = contract_path.read_text()
 
-    if contract_path.suffix == ".yaml":
+    if contract_path.suffix in (".yaml", ".yml"):
         try:
-            data = yaml.safe_load(content)
+            data = parse_contract(contract_path)["raw"]
             signed = data.get("signed_date") or data.get("date")
             if signed:
                 return _parse_date(str(signed))
         except Exception:
             pass
+    else:
+        metadata = parse_contract(contract_path).get("metadata", {})
+        for key in ("签署日期", "创建日期", "日期", "Signed Date", "Date"):
+            if metadata.get(key):
+                return _parse_date(metadata[key])
 
     # Markdown 契约：查找签署日期
     patterns = [
@@ -147,7 +131,7 @@ def _parse_date(date_str: str) -> datetime | None:
 
 def check_contract_age(contract_path: Path, max_age_hours: float) -> dict:
     """检查1: 契约签署时效"""
-    task_id = _extract_task_id(contract_path)
+    task_id = extract_task_id(contract_path)
     signed = extract_signed_date(contract_path)
 
     if not signed:
@@ -184,11 +168,11 @@ def check_graph_changes(contract_path: Path, graph_file: Path) -> dict | None:
     if not graph_file or not graph_file.exists():
         return None
 
-    task_id = _extract_task_id(contract_path)
+    task_id = extract_task_id(contract_path)
     signed = extract_signed_date(contract_path) or get_mtime(contract_path)
     graph_mtime = get_mtime(graph_file)
 
-    changed = graph_mtime > signed
+    changed = _changed_after_signed(graph_mtime, signed)
     return {
         "task": task_id,
         "check": "graph_changes",
@@ -207,11 +191,11 @@ def check_constraints_changes(contract_path: Path,
     if not constraints_file or not constraints_file.exists():
         return None
 
-    task_id = _extract_task_id(contract_path)
+    task_id = extract_task_id(contract_path)
     signed = extract_signed_date(contract_path) or get_mtime(contract_path)
     constraints_mtime = get_mtime(constraints_file)
 
-    changed = constraints_mtime > signed
+    changed = _changed_after_signed(constraints_mtime, signed)
     return {
         "task": task_id,
         "check": "constraints_changes",
@@ -226,11 +210,11 @@ def check_constraints_changes(contract_path: Path,
 
 def check_dependency_freshness(contract_path: Path) -> list[dict]:
     """检查4: 契约引用的依赖工件是否过期"""
-    task_id = _extract_task_id(contract_path)
+    task_id = extract_task_id(contract_path)
 
-    if contract_path.suffix == ".yaml":
+    if contract_path.suffix in (".yaml", ".yml"):
         try:
-            data = yaml.safe_load(contract_path.read_text())
+            data = parse_contract(contract_path)["raw"]
         except Exception:
             return []
 
@@ -241,8 +225,9 @@ def check_dependency_freshness(contract_path: Path) -> list[dict]:
         issues = []
         for dep in deps:
             # 如果是任务 ID，检查对应契约
-            dep_contract = contract_path.parent / f"Intent_Contract_{dep}.yaml"
-            if dep_contract.exists():
+            project_dir = contract_path.parents[2]
+            dep_contract = find_contract(project_dir, str(dep))
+            if dep_contract is not None:
                 dep_age = get_age_hours(dep_contract)
                 if dep_age > 168:  # 一周
                     issues.append({
@@ -257,9 +242,11 @@ def check_dependency_freshness(contract_path: Path) -> list[dict]:
     return []
 
 
-def _extract_task_id(filepath: Path) -> str:
-    m = re.search(r"Intent_Contract_(.+?)\.(?:yaml|md)", filepath.name)
-    return m.group(1) if m else filepath.stem
+def _changed_after_signed(artifact_mtime: datetime, signed: datetime) -> bool:
+    """日期级签署不伪造时分；同日变更视为同一签署窗口。"""
+    if signed.hour == signed.minute == signed.second == signed.microsecond == 0:
+        return artifact_mtime.date() > signed.date()
+    return artifact_mtime > signed
 
 
 # ─── 主流程 ────────────────────────────────────────────────
@@ -277,27 +264,27 @@ def verify_freshness(project_dir: Path, max_age_hours: float,
     }
 
     # 发现文件
+    try:
+        contract_files = ([find_contract(project_dir, task_id)] if task_id
+                          else find_contracts(project_dir))
+    except ContractConflictError as exc:
+        result["status"] = "FAIL"
+        result["error"] = str(exc)
+        return result
     if task_id:
-        contract_path = project_dir / "governance" / "contracts" / f"Intent_Contract_{task_id}.yaml"
-        if not contract_path.exists():
-            contract_path = project_dir / "governance" / "contracts" / f"Intent_Contract_{task_id}.md"
-        if not contract_path.exists():
+        if contract_files[0] is None:
             result["status"] = "FAIL"
             result["error"] = f"未找到契约文件: Intent_Contract_{task_id}"
             return result
-        contract_files = [contract_path]
-    else:
-        contract_files = find_contracts(project_dir)
+        contract_files = [contract_files[0]]
 
     # 豁免已完成任务：任务已有签署证据包（HITL 裁决）时，
     # 时效检查失去意义——契约已履行完毕，不存在"用过期契约执行"的风险
-    sys.path.insert(0, str(Path(__file__).parent))
-    from gov_common import is_task_completed as _gc_is_completed
     skipped_completed = []
     active_files = []
     for cf in contract_files:
-        tid = _extract_task_id(cf)
-        if _gc_is_completed(project_dir, tid):
+        tid = extract_task_id(cf)
+        if is_task_completed(project_dir, tid):
             skipped_completed.append(tid)
         else:
             active_files.append(cf)
@@ -313,7 +300,7 @@ def verify_freshness(project_dir: Path, max_age_hours: float,
     constraints_file = find_constraints(project_dir)
 
     for cf in contract_files:
-        task = _extract_task_id(cf)
+        task = extract_task_id(cf)
         contract_result = {
             "task": task,
             "file": str(cf.relative_to(project_dir)),

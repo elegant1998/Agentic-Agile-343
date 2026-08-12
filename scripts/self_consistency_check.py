@@ -94,7 +94,7 @@ def check_frontend_routes(project_dir: Path, expected_pages: list) -> tuple[bool
 
 
 sys.path.insert(0, str(Path(__file__).parent))
-from gov_common import find_contract as _gc_find_contract
+from gov_common import ContractConflictError, find_contract as _gc_find_contract
 
 
 def _load_self_consistency_config(contract_file: Path) -> dict:
@@ -130,7 +130,7 @@ def check_consistency(project_dir: Path, task_id: str) -> dict:
     """执行自洽性检查"""
     contract_file = _gc_find_contract(project_dir, task_id)
     if contract_file is None:
-        return {"error": f"契约文件不存在: Intent_Contract_{task_id}（.yaml/.md）"}
+        return {"error": f"契约文件不存在: Intent_Contract_{task_id}（.yaml/.yml/.md）"}
 
     sc = _load_self_consistency_config(contract_file)
     if not sc:
@@ -206,7 +206,10 @@ def main():
         if attempt > 0:
             print(f"\n🔄 自洽性检查第 {attempt + 1} 次重试...")
 
-        result = check_consistency(project_dir, args.task)
+        try:
+            result = check_consistency(project_dir, args.task)
+        except ContractConflictError as exc:
+            result = {"status": "FAIL", "all_pass": False, "error": str(exc)}
 
         if args.format == "json":
             print(json.dumps(result, indent=2, ensure_ascii=False))

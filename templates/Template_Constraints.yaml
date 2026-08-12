@@ -120,8 +120,8 @@ constraints:
     domain: STYLE
     level: MUST
     description: "AI 编码规范文件存在且非空"
-    check_type: python
-    check: "(project_dir / 'governance/AI_Coding_Guide.md').is_file() and (project_dir / 'governance/AI_Coding_Guide.md').stat().st_size > 0"
+    check_type: predicate
+    check: "nonempty_file('governance/AI_Coding_Guide.md')"
     watch_paths: ["governance/AI_Coding_Guide.md"]
     gate: G0
     on_failure: "block"
@@ -149,8 +149,8 @@ constraints:
     domain: STYLE
     level: SHOULD
     description: "至少 1 条硬性红线已从 [待 OA 填写] 改为实际规则"
-    check_type: python
-    check: "any(line.startswith('|') and '[待' not in line for line in (project_dir / 'governance/AI_Coding_Guide.md').read_text(encoding='utf-8').splitlines())"
+    check_type: predicate
+    check: "has_line('governance/AI_Coding_Guide.md', '|', '[待')"
     watch_paths: ["governance/AI_Coding_Guide.md"]
     gate: G0
     on_failure: "warn"
@@ -159,8 +159,8 @@ constraints:
     domain: STYLE
     level: SHOULD
     description: "每条红线包含原因说明（帮助 AI 举一反三）"
-    check_type: python
-    check: "'原因' in (project_dir / 'governance/AI_Coding_Guide.md').read_text(encoding='utf-8')"
+    check_type: predicate
+    check: "contains('governance/AI_Coding_Guide.md', '原因')"
     watch_paths: ["governance/AI_Coding_Guide.md"]
     gate: G0
     on_failure: "warn"
@@ -173,8 +173,8 @@ constraints:
     domain: STRUCT
     level: MUST
     description: "治理文档目录 governance/ 存在"
-    check_type: python
-    check: "(project_dir / 'governance').is_dir()"
+    check_type: predicate
+    check: "is_dir('governance')"
     watch_paths: ["governance/"]
     gate: G1
     on_failure: "block"
@@ -190,8 +190,8 @@ constraints:
     domain: STRUCT
     level: MUST
     description: "意图图谱和约束矩阵文件存在"
-    check_type: python
-    check: "all((project_dir / p).is_file() for p in ['governance/Intent_Graph.md', 'governance/constraints.yaml'])"
+    check_type: predicate
+    check: "all_files(['governance/Intent_Graph.md', 'governance/constraints.yaml'])"
     watch_paths: ["governance/Intent_Graph.md", "governance/constraints.yaml"]
     gate: G1
     on_failure: "block"
@@ -202,8 +202,8 @@ constraints:
     domain: STRUCT
     level: SHOULD
     description: "项目源码目录 src/ 和测试目录 tests/ 存在 [CLI/Lib 项目可按需调整路径]"
-    check_type: python
-    check: "all((project_dir / p).is_dir() for p in ['src', 'tests'])"
+    check_type: predicate
+    check: "all_dirs(['src', 'tests'])"
     watch_paths: ["src/", "tests/"]
     gate: G1
     on_failure: "warn"
@@ -215,8 +215,8 @@ constraints:
     domain: DATA
     level: MUST
     description: "意图图谱中包含项目名称"
-    check_type: python
-    check: "'YOUR_PROJECT_NAME' in (project_dir / 'governance/Intent_Graph.md').read_text(encoding='utf-8')"
+    check_type: predicate
+    check: "contains('governance/Intent_Graph.md', 'YOUR_PROJECT_NAME')"
     watch_paths: ["governance/Intent_Graph.md"]
     gate: G2
     on_failure: "block"
@@ -227,8 +227,8 @@ constraints:
     domain: DATA
     level: MUST
     description: "约束矩阵中包含至少一条 MUST 约束"
-    check_type: python
-    check: "'MUST' in (project_dir / 'governance/constraints.yaml').read_text(encoding='utf-8')"
+    check_type: predicate
+    check: "contains('governance/constraints.yaml', 'MUST')"
     watch_paths: ["governance/constraints.yaml"]
     gate: G2
     on_failure: "block"
@@ -240,8 +240,8 @@ constraints:
     domain: BEHAVE
     level: SHOULD
     description: "核心脚本可被 Python 解析 [按项目语言调整]"
-    check_type: python
-    check: "__import__('ast').parse((project_dir / 'scripts/collect_telemetry.py').read_text(encoding='utf-8')) is not None"
+    check_type: predicate
+    check: "python_syntax('scripts/collect_telemetry.py')"
     watch_paths: ["scripts/collect_telemetry.py"]
     gate: G3
     on_failure: "warn"

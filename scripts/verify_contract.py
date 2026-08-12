@@ -7,7 +7,7 @@
   - shell:   执行 shell 命令，退出码 0 = 通过
   - http:    发起 HTTP 请求，检查状态码/响应体
   - db:      执行数据库查询，检查返回行数/值
-  - assert:  运行 Python 表达式，True = 通过
+  - predicate: 运行无副作用的 AST 白名单谓词，True = 通过
 
 用法:
     # 验证单个契约
@@ -43,11 +43,10 @@
           command: "grep -q 'user_id' src/models/point.py"
 
       - id: "AC-03"
-        desc: "积分余额永远 >= 0"
+        desc: "治理目录存在"
         verify:
-          type: assert
-          expression: "check_points_not_negative()"
-          setup: "from tests.helpers import check_points_not_negative"
+          type: predicate
+          expression: "is_dir('governance')"
 
       - id: "AC-04"
         desc: "数据库中有初始会员等级配置"
@@ -71,6 +70,7 @@ import urllib.error
 from pathlib import Path
 from textwrap import dedent
 from command_runner import run_command, run_shell
+from safe_predicate import run_predicate
 
 try:
     import yaml
@@ -136,16 +136,14 @@ def verify_http(method: str, url: str, headers: dict, expect: dict,
 
 def verify_db(engine: str, query: str, expect: dict) -> tuple[bool, str]:
     """执行数据库查询验证"""
+    conn = None
+    cursor = None
     try:
         # 动态导入，避免强制依赖
         if "sqlite" in engine:
             import sqlite3
             db_path = engine.replace("sqlite:///", "")
             conn = sqlite3.connect(db_path)
-            cursor = conn.cursor()
-            cursor.execute(query)
-            rows = cursor.fetchall()
-            conn.close()
         elif "postgresql" in engine or "postgres" in engine:
             # 尝试 psycopg2
             try:
@@ -153,12 +151,12 @@ def verify_db(engine: str, query: str, expect: dict) -> tuple[bool, str]:
             except ImportError:
                 return False, "需要安装 psycopg2: pip install psycopg2-binary"
             conn = psycopg2.connect(engine)
-            cursor = conn.cursor()
-            cursor.execute(query)
-            rows = cursor.fetchall()
-            conn.close()
         else:
             return False, f"不支持的数据库引擎: {engine}"
+
+        cursor = conn.cursor()
+        cursor.execute(query)
+        rows = cursor.fetchall()
 
         row_count = len(rows)
         failures = []
@@ -168,31 +166,36 @@ def verify_db(engine: str, query: str, expect: dict) -> tuple[bool, str]:
             failures.append(f"期望 ≤{expect['max_rows']} 行, 实际 {row_count}")
         if "exact_rows" in expect and row_count != expect["exact_rows"]:
             failures.append(f"期望 {expect['exact_rows']} 行, 实际 {row_count}")
-        if "value" in expect and rows:
-            # 检查第一行第一列的值
-            actual = rows[0][0]
-            expected = expect["value"]
-            if actual != expected:
-                failures.append(f"期望值 {expected}, 实际 {actual}")
+        if "value" in expect:
+            if not rows:
+                failures.append(f"期望值 {expect['value']}, 但查询返回 0 行")
+            else:
+                actual = rows[0][0]
+                expected = expect["value"]
+                if actual != expected:
+                    failures.append(f"期望值 {expected}, 实际 {actual}")
 
         if failures:
             return False, "; ".join(failures)
         return True, f"查询返回 {row_count} 行"
     except Exception as e:
         return False, str(e)
+    finally:
+        for resource in (cursor, conn):
+            if resource is not None:
+                try:
+                    resource.close()
+                except Exception:
+                    pass
 
 
 def verify_assert(expression: str, setup: str = "") -> tuple[bool, str]:
-    """执行 Python 断言验证"""
-    try:
-        namespace = {}
-        if setup:
-            exec(setup, namespace)
-        result = eval(expression, namespace)
-        passed = bool(result)
-        return passed, f"表达式结果: {result}"
-    except Exception as e:
-        return False, str(e)
+    """Legacy arbitrary Python assertions are blocked by default."""
+    return False, "UNSAFE_LEGACY_CHECK: assert/setup is blocked; migrate to predicate or command"
+
+
+def verify_predicate(expression: str, project_dir: Path) -> tuple[bool, str]:
+    return run_predicate(expression, project_dir)
 
 
 # ─── TDD: AC → 测试骨架生成 ───────────────────────────────
@@ -278,13 +281,16 @@ def _generate_python_tests(task_id, domain, ac_list, contract, contract_path):
     needs_db = any(ac.get("verify", {}).get("type") == "db" for ac in ac_list)
     needs_http = any(ac.get("verify", {}).get("type") == "http" for ac in ac_list)
     needs_shell = any(ac.get("verify", {}).get("type") in {"shell", "command"} for ac in ac_list)
+    needs_path = needs_shell or any(ac.get("verify", {}).get("type") == "predicate" for ac in ac_list)
 
     if needs_db:
         lines.append('from sqlalchemy import create_engine, text')
     if needs_http:
         lines.append(f'from src.main import app  # 根据实际项目调整')
+    if needs_path:
+        lines.append('from pathlib import Path')
     if needs_shell:
-        lines.extend(['from pathlib import Path', 'from command_runner import run_command, run_shell'])
+        lines.append('from command_runner import run_command, run_shell')
 
     lines.extend([
         '',
@@ -363,12 +369,12 @@ def _generate_python_tests(task_id, domain, ac_list, contract, contract_path):
             lines.append(f'    result = run_command({command!r}, Path.cwd())')
             lines.append(f'    assert result["status"] == "PASS", result')
 
+        elif vtype == "predicate":
+            expression = verify_cfg.get("expression", "False")
+            lines.append('    from safe_predicate import evaluate_predicate')
+            lines.append(f'    assert evaluate_predicate({expression!r}, Path.cwd()), "安全谓词失败"')
         elif vtype == "assert":
-            expression = verify_cfg.get("expression", "True")
-            setup = verify_cfg.get("setup", "")
-            if setup:
-                lines.append(f'    {setup}')
-            lines.append(f'    assert {expression}, "断言失败"')
+            lines.append('    pytest.fail("UNSAFE_LEGACY_CHECK: migrate assert/setup to predicate or command")')
 
         else:
             lines.append(f'    # TODO: 未知验证类型 {vtype}，请手动编写')
@@ -611,7 +617,13 @@ def write_generated_tests(contract_path: Path, project_dir: Path):
 # ─── 主流程 ───────────────────────────────────────────────
 
 sys.path.insert(0, str(Path(__file__).parent))
-from gov_common import find_contracts as _gc_find_contracts, find_contract as _gc_find_contract, parse_contract
+from gov_common import (
+    ContractConflictError,
+    extract_task_id as _gc_extract_task_id,
+    find_contract as _gc_find_contract,
+    find_contracts as _gc_find_contracts,
+    parse_contract,
+)
 
 
 def find_contract_files(project_dir: Path) -> list[Path]:
@@ -620,9 +632,8 @@ def find_contract_files(project_dir: Path) -> list[Path]:
 
 
 def extract_task_id(filepath: Path) -> str:
-    """从文件名提取任务 ID"""
-    m = re.search(r"Intent_Contract_(.+?)\.(?:yaml|yml|md)$", filepath.name)
-    return m.group(1) if m else filepath.stem
+    """兼容既有调用；任务 ID 规则由 gov_common 统一维护。"""
+    return _gc_extract_task_id(filepath)
 
 
 def verify_contract(contract_path: Path, project_dir: Path,
@@ -687,6 +698,11 @@ def verify_contract(contract_path: Path, project_dir: Path,
                 ok, detail = verify_assert(
                     verify_cfg.get("expression", "") or verify_cfg.get("expr", "True"),
                     verify_cfg.get("setup", ""),
+                )
+            elif vtype == "predicate":
+                ok, detail = verify_predicate(
+                    verify_cfg.get("expression", "") or verify_cfg.get("expr", "False"),
+                    project_dir,
                 )
             else:
                 ok, detail = False, f"未知验证类型: {vtype}"
@@ -781,6 +797,14 @@ def main():
 
     project_dir = Path(args.project_dir).resolve()
 
+    try:
+        _main_with_args(args, project_dir)
+    except ContractConflictError as exc:
+        print(f"错误: {exc}", file=sys.stderr)
+        sys.exit(2)
+
+
+def _main_with_args(args, project_dir: Path):
     # TDD 模式：生成测试骨架
     if args.generate_tests:
         if not args.task:
@@ -788,7 +812,7 @@ def main():
             sys.exit(2)
         contract_path = _gc_find_contract(project_dir, args.task)
         if not contract_path:
-            print(f"错误: 找不到契约文件 Intent_Contract_{args.task}（.yaml/.md）", file=sys.stderr)
+            print(f"错误: 找不到契约文件 Intent_Contract_{args.task}（.yaml/.yml/.md）", file=sys.stderr)
             sys.exit(2)
         write_generated_tests(contract_path, project_dir)
         return
@@ -796,7 +820,7 @@ def main():
     if args.task:
         contract_path = _gc_find_contract(project_dir, args.task)
         if not contract_path:
-            print(f"错误: 找不到契约文件 Intent_Contract_{args.task}（.yaml/.md）", file=sys.stderr)
+            print(f"错误: 找不到契约文件 Intent_Contract_{args.task}（.yaml/.yml/.md）", file=sys.stderr)
             sys.exit(2)
         reports = [verify_contract(contract_path, project_dir, args.base_url)]
     elif args.all:

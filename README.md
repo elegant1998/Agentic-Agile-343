@@ -1,4 +1,4 @@
-# Agentic Agile 3-4-3 治理架构 · 开源版 v1.42.0
+# Agentic Agile 3-4-3 治理架构 · 开源版 v1.45.0
 
 > **让AI交付可治理、可追溯、可验证。** 这是一套 Agentic AI 研发的**完整、可运行治理框架**——从意图契约到证据闭环、从约束门禁到遥测仪表板，全部开源，开箱即用。让 AI 研发治理，进可攻退可守。
 
@@ -131,7 +131,17 @@ python scripts/cli.py list
 ```
 
 缺少 PyYAML 时，YAML 消费脚本会通过 Python 原生 `_bootstrap.py` 创建/复用
-`~/.agentic-agile-343/venv` 并安装依赖；Windows、macOS、Linux 使用同一实现。
+`~/.agentic-agile-343/venv`。仅首次缺失时安装依赖；后续健康检查通过即直接复用，
+不再调用 pip。Windows、macOS、Linux 使用同一实现。
+
+Dashboard 所需的 `ocusage` 在首次 Skill 发布安装时写入用户私有目录
+`~/.agentic-agile-343/tools/ocusage`；后续只做存在性检查并直接复用。若系统没有
+npm，会自动发现常见本地 Node/npm；也可安装 Node.js/npm 或通过
+`AGENTIC_AGILE_NPM` 显式指定 npm 路径。
+
+遥测与 AI 工具解耦：`AGENTIC_AGILE_HOST_TOOL` 标识当前宿主，
+`AGENTIC_AGILE_TOKEN_CLIENT` 选择实际用量客户端。项目日累计 Token 只保存为基线；
+只有同客户端、同项目、同自然日的起止差值计入任务统计，缺测或歧义显示 `N/A`。
 
 ### 2. 初始化项目治理（单人）
 

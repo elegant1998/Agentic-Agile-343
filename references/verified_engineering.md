@@ -29,7 +29,7 @@
 | shell | `type: shell` | 执行 bash 命令，退出码 0 = 通过 |
 | http | `type: http` | 发起 HTTP 请求，检查状态码/响应体 |
 | db | `type: db` | 执行 SQL 查询，检查行数/值 |
-| assert | `type: assert` | 运行 Python 表达式，True = 通过 |
+| predicate | `type: predicate` | 运行无副作用 AST 白名单谓词，True = 通过 |
 
 契约 ac 字段示例：
 ```yaml
@@ -151,19 +151,19 @@ python scripts/harness.py nfr-list
 
 ### 跨平台 check 原语（v1.15+）
 
-约束的 `check` 字段推荐使用结构化 `check_type: command` 或 `check_type: python`。Shell 只在确有必要时使用，并必须显式声明 `posix` / `powershell` / `cmd` 方言；缺少对应 Shell 时返回 UNSUPPORTED 并 fail closed。对于跨平台兼容的约束，可使用 `check_type: python` 指定 Python 表达式：
+约束的 `check` 字段推荐使用结构化 `check_type: command` 或 `check_type: predicate`。Shell 只在确有必要时使用，并必须显式声明 `posix` / `powershell` / `cmd` 方言；缺少对应 Shell 时返回 UNSUPPORTED 并 fail closed。跨平台文件与文本检查使用安全谓词：
 
 ```yaml
 - id: C-STRUCT-01
   domain: STRUCT
   level: MUST
   description: "governance 目录存在"
-  check: "project_dir.joinpath('governance').is_dir()"
-  check_type: python
+  check: "is_dir('governance')"
+  check_type: predicate
   gate: G1
 ```
 
-Python check 表达式可访问 `Path` 和 `project_dir` 变量。
+谓词不开放 Python builtins、导入、属性穿透、lambda、推导式或赋值；旧任意 Python 检查会返回 `UNSAFE_LEGACY_CHECK`。
 
 ## P2: 回滚安全性验证 (verify_rollback_safety.py)
 

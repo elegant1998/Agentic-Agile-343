@@ -36,6 +36,8 @@ from datetime import datetime, date
 from pathlib import Path
 from command_runner import run_command, run_shell
 from runtime_context import load_trusted_verification_context, parse_test_output, resolve_test_plan
+from safe_predicate import run_predicate
+from telemetry_tracker import append_event
 
 
 _RUNTIME_FILE_CACHE = {}
@@ -125,20 +127,6 @@ def _run_shell_check(check_cmd: str, project_dir: Path, timeout: int = 30) -> tu
     return result["status"] == "PASS", detail[:200]
 
 
-def _run_python_check(expr: str, project_dir: Path) -> tuple[bool, str]:
-    """执行 Python 表达式作为 check（跨平台备选方案）。
-
-    约束中 check_type: python + check: "expression" 时使用。
-    expression 可以是任意 Python 表达式，返回 True/False。
-    """
-    try:
-        result = eval(expr, {"__builtins__": __builtins__}, {"Path": Path, "project_dir": project_dir})
-        passed = bool(result)
-        return passed, "通过" if passed else "失败"
-    except Exception as e:
-        return False, f"Python check 异常: {e}"
-
-
 def run_check(constraint: dict, project_dir: Path) -> tuple[bool, str]:
     """执行单条约束检查（跨平台）"""
     check_cmd = constraint.get("check", "true")
@@ -151,9 +139,11 @@ def run_check(constraint: dict, project_dir: Path) -> tuple[bool, str]:
         nfr_params = constraint.get("nfr_params", {})
         return run_nfr_check(nfr_name, project_dir, nfr_params)
 
-    # Python 表达式 check（跨平台，check_type: python）
+    if constraint.get("check_type") == "predicate":
+        return run_predicate(str(check_cmd), project_dir)
+
     if constraint.get("check_type") == "python":
-        return _run_python_check(check_cmd, project_dir)
+        return False, "UNSAFE_LEGACY_CHECK: check_type python is blocked; migrate to predicate or command"
 
     if constraint.get("check_type") == "command":
         result = run_command(check_cmd, project_dir)
@@ -166,6 +156,9 @@ def run_check(constraint: dict, project_dir: Path) -> tuple[bool, str]:
         result = run_shell(spec, project_dir)
         detail = result.get("stderr") or result.get("stdout") or result.get("detail") or result["status"]
         return result["status"] == "PASS", detail[:200]
+
+    if constraint.get("check_type"):
+        return False, f"UNSUPPORTED_CHECK_TYPE: {constraint.get('check_type')}"
 
     # Shell check（跨平台：bash 优先，无 bash 时降级）
     return _run_shell_check(check_cmd, project_dir)
@@ -541,124 +534,7 @@ def run_tests(project_dir: Path, params: dict | None = None) -> dict:
 
 
 def _parse_test_output(runner: str, out: str) -> dict:
-    shared = parse_test_output(runner, out)
-    if shared["total"] or runner in {"unittest", "pytest", "vitest", "jest", "npm", "go", "cargo", "mvn", "dotnet"}:
-        return shared
-    base = {"total": 0, "passed": 0, "failed": 0, "errors": 0}
-    # Go / Rust / Java / C# 专用解析器
-    if runner == "go":
-        return _parse_go_test_output(out)
-    if runner == "cargo":
-        return _parse_cargo_test_output(out)
-    if runner == "mvn":
-        return _parse_mvn_test_output(out)
-    if runner == "dotnet":
-        return _parse_dotnet_test_output(out)
-    if runner == "unittest":
-        m = re.search(r"Ran (\d+) tests?", out)
-        if m:
-            base["total"] = int(m.group(1))
-        failed = 0
-        errors = 0
-        summary = re.search(r"FAILED \(([^)]+)\)", out)
-        if summary:
-            fm = re.search(r"failures=(\d+)", summary.group(1))
-            em = re.search(r"errors=(\d+)", summary.group(1))
-            failed = int(fm.group(1)) if fm else 0
-            errors = int(em.group(1)) if em else 0
-        base["failed"] = failed
-        base["errors"] = errors
-        base["passed"] = max(base["total"] - failed - errors, 0) if base["total"] else 0
-        return base
-    if runner in ("vitest", "jest"):
-        try:
-            start = out.find("{")
-            end = out.rfind("}")
-            if start != -1 and end != -1:
-                obj = json.loads(out[start:end + 1])
-                if runner == "jest":
-                    base["total"] = obj.get("numTotalTests", 0)
-                    base["passed"] = obj.get("numPassedTests", 0)
-                    base["failed"] = obj.get("numFailedTests", 0)
-                    base["errors"] = obj.get("numPendingTests", 0)
-                else:  # vitest
-                    base["total"] = obj.get("numTotalTests", 0)
-                    base["passed"] = obj.get("numPassedTests", 0)
-                    base["failed"] = obj.get("numFailedTests", 0)
-                    base["errors"] = obj.get("numPendingTests", 0)
-                return base
-        except Exception:
-            pass
-    # 文本回退：Vitest/Jest 摘要行 "Tests  X failed | Y passed | Z total"
-    m = re.search(r"Tests\s+(\d+)\s+failed[^|]*\|\s*(\d+)\s+passed[^|]*\|\s*(\d+)\s+total", out)
-    if m:
-        base["failed"] = int(m.group(1))
-        base["passed"] = int(m.group(2))
-        base["total"] = int(m.group(3))
-        return base
-    m2 = re.search(r"(\d+)\s+passed", out)
-    if m2:
-        base["passed"] = int(m2.group(1))
-        fm = re.search(r"(\d+)\s+failed", out)
-        base["failed"] = int(fm.group(1)) if fm else 0
-        base["total"] = base["passed"] + base["failed"]
-    return base
-
-
-def _parse_go_test_output(out: str) -> dict:
-    """解析 go test -v 输出"""
-    base = {"total": 0, "passed": 0, "failed": 0, "errors": 0}
-    # go test -v 输出 "--- PASS: TestX" / "--- FAIL: TestX"
-    base["passed"] = len(re.findall(r"^--- PASS:", out, re.MULTILINE))
-    base["failed"] = len(re.findall(r"^--- FAIL:", out, re.MULTILINE))
-    base["total"] = base["passed"] + base["failed"]
-    # 编译错误也算失败
-    if re.search(r"FAIL\t.*\[build failed\]", out):
-        base["errors"] = 1
-    return base
-
-
-def _parse_cargo_test_output(out: str) -> dict:
-    """解析 cargo test 输出"""
-    base = {"total": 0, "passed": 0, "failed": 0, "errors": 0}
-    # cargo test: "test result: ok. 5 passed; 0 failed; 0 ignored;"
-    m = re.search(r"test result:.*?(\d+)\s+passed;\s*(\d+)\s+failed;\s*(\d+)\s+ignored", out)
-    if m:
-        base["passed"] = int(m.group(1))
-        base["failed"] = int(m.group(2))
-        base["total"] = base["passed"] + base["failed"] + int(m.group(3))
-    return base
-
-
-def _parse_mvn_test_output(out: str) -> dict:
-    """解析 mvn test 输出"""
-    base = {"total": 0, "passed": 0, "failed": 0, "errors": 0}
-    # mvn test: "Tests run: 5, Failures: 0, Errors: 0, Skipped: 0"
-    total_run = 0
-    total_fail = 0
-    total_err = 0
-    for m in re.finditer(r"Tests run:\s*(\d+),\s*Failures:\s*(\d+),\s*Errors:\s*(\d+)", out):
-        total_run += int(m.group(1))
-        total_fail += int(m.group(2))
-        total_err += int(m.group(3))
-    base["total"] = total_run
-    base["passed"] = total_run - total_fail - total_err
-    base["failed"] = total_fail
-    base["errors"] = total_err
-    return base
-
-
-def _parse_dotnet_test_output(out: str) -> dict:
-    """解析 dotnet test 输出"""
-    base = {"total": 0, "passed": 0, "failed": 0, "errors": 0}
-    # dotnet test: "Passed: 5", "Failed: 1", "Skipped: 0", "Total: 6"
-    pm = re.search(r"Passed:\s*(\d+)", out)
-    fm = re.search(r"Failed:\s*(\d+)", out)
-    tm = re.search(r"Total:\s*(\d+)", out)
-    base["passed"] = int(pm.group(1)) if pm else 0
-    base["failed"] = int(fm.group(1)) if fm else 0
-    base["total"] = int(tm.group(1)) if tm else (base["passed"] + base["failed"])
-    return base
+    return parse_test_output(runner, out)
 
 
 def _parse_coverage(project_dir: Path) -> float:
@@ -716,7 +592,8 @@ def attempt_recovery(constraint: dict, project_dir: Path) -> tuple[bool, str]:
 
 def recover_constraints(project_dir: Path, domain: str = None,
                         module: str = None,
-                        dry_run: bool = False) -> dict:
+                        dry_run: bool = False,
+                        task_id: str | None = None) -> dict:
     """recover 子命令：自动修复失败的约束"""
     data = load_constraints(project_dir, module)
     constraints = data.get("constraints", [])
@@ -768,13 +645,24 @@ def recover_constraints(project_dir: Path, domain: str = None,
             })
             continue
 
+        if task_id and not dry_run:
+            append_event(project_dir, task_id, "constraint_failed", result="FAIL", actor="harness",
+                         constraint_id=c["id"], evidence=[detail])
+
         # 尝试恢复
         if not dry_run:
             for attempt in range(max_retries):
                 recovered_ok, rec_detail = attempt_recovery(c, project_dir)
                 if recovered_ok:
+                    if task_id:
+                        append_event(project_dir, task_id, "constraint_resolved", result="RECOVERED",
+                                     actor="harness", constraint_id=c["id"], evidence=[rec_detail])
                     # 恢复后验证
                     verify_ok, verify_detail = run_check(c, project_dir)
+                    if task_id:
+                        append_event(project_dir, task_id, "constraint_reverified",
+                                     result="PASS" if verify_ok else "FAIL", actor="harness",
+                                     constraint_id=c["id"], evidence=[verify_detail])
                     if verify_ok:
                         results.append({
                             "id": c["id"],
@@ -1028,6 +916,7 @@ def main():
     recover_parser.add_argument("--format", choices=["text", "json"], default="text")
     recover_parser.add_argument("--project-dir", default=".", help="项目根目录")
     recover_parser.add_argument("--module", default=None, help="恢复模块级约束")
+    recover_parser.add_argument("--task", default=None, help="任务 ID，用于记录恢复事件链")
 
     args = parser.parse_args()
     project_dir = Path(args.project_dir).resolve() if hasattr(args, 'project_dir') else Path(".")
@@ -1073,7 +962,8 @@ def main():
         sys.exit(0 if report["failed"] == 0 else 1)
 
     if args.command == "recover":
-        report = recover_constraints(project_dir, args.domain, getattr(args, "module", None), args.dry_run)
+        report = recover_constraints(project_dir, args.domain, getattr(args, "module", None),
+                                     args.dry_run, getattr(args, "task", None))
 
         if args.format == "json":
             print(json.dumps(report, indent=2, ensure_ascii=False))

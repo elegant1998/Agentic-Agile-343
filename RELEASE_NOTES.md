@@ -2,14 +2,79 @@
 
 > 🌐 English version: [RELEASE_NOTES.en.md](RELEASE_NOTES.en.md)
 
-# Agentic Agile 3-4-3 治理架构 · 开源版 v1.42.0
+# Agentic Agile 3-4-3 治理架构 · 开源版 v1.45.0
 
 > **先校准、再打怪。** 这是完整、可运行的 Agentic AI 研发治理框架——全部开源，无保留。让 AI 研发治理，进可攻退可守。
 
-- **版本**：`1.42.0`
+- **版本**：`1.45.0`
 - **发布日期**：2026-08-12
 - **许可证**：代码/模板 MIT · 白皮书 CC BY 4.0
 - **作者**：王立杰（无敌哥），AI 治理架构师
+
+## v1.45.0：跨 AI 工具可信遥测与不可旁路收口
+
+- 遥测分别记录宿主 AI 工具、Token 客户端和稳定项目身份，不再把 WorkBuddy、Codex、Claude Code 等运行宿主与用量数据源混为一谈。
+- Token 用量采用结构化测量契约；项目日累计快照只可作为基线，只有同客户端、同项目、同自然日的起止差值才计入任务 Token 与项目聚合。缺测、歧义或跨日统一为 `UNKNOWN/N/A`。
+- `change prepare` 自动捕获 Token 基线；`change verify` 自动串联 Prove、Evidence、Telemetry、Intent Graph 反馈与 Closing Gate，任一步失败均返回 `BLOCKED`，成功终态为 `CLOSED`。
+- 首次正式 Prove 失败写入追加式事件账本；Harness 带 `--task` 恢复时自动记录约束失败、恢复和复验事件链，自愈率不再依赖手工数字。
+
+## v1.44.9：治理验证器健壮性修复
+
+- 数据库契约查询在成功或异常路径都会关闭 cursor 与连接；仅声明期望值时，0 行结果不再误判通过。
+- Vitest/Jest pending 不再误记为 error，dotnet `Failed!` 汇总可正确提取通过、失败及总数。
+- 遥测合并使用标准顶部导入；Bug 门遇到损坏遥测文件时继续扫描并输出明确诊断。
+
+## v1.44.8：工具无关的本地 Node/npm 自动发现
+
+- Token 工具自举在显式配置和 PATH 均不可用时，自动发现 AI 工具内置运行时、nvm、fnm、Volta、Homebrew 等常见本地 Node/npm。
+- 候选运行时必须同时提供同目录 `node` 和 `npm`，并优先选择较新的版本；发现后仍只执行一次私有安装，后续直接复用。
+
+## v1.44.7：ocusage 3.9 项目遥测协议适配
+
+- 适配新版 CLI，移除已废弃的 `--project` 参数，并从 JSON `byProject` 中精确提取当前项目 Token。
+
+## v1.44.6：Token CLI 显式 Node 启动
+
+- Dashboard 使用固定 Node 绝对路径直接启动私有 `cli.mjs`，不再依赖 `.bin` 包装器或运行时 PATH。
+
+## v1.44.5：软链接 npm 启动修复
+
+- 保留用户提供的 npm 入口目录，不再解析软链接到 npm 包内部目录，确保同级 Node 可被 `env node` 找到。
+
+## v1.44.4：私有 npm 自举 PATH 兼容
+
+- 使用 `AGENTIC_AGILE_NPM` 或非标准路径 npm 时，自动把其同目录 Node 加入安装子进程 PATH。
+- 修复 WorkBuddy、版本管理器等隔离 Node 环境中 npm 可发现但 `env node` 无法启动的问题。
+
+## v1.44.3：Token 遥测工具一次性自举
+
+- `@geeeger/ocusage` 首次安装到 `~/.agentic-agile-343/tools/ocusage`，后续 Dashboard 直接复用，不再调用 npm。
+- Skill 发布安装与 Dashboard 运行时共用同一工具自举器；私有工具损坏或缺失时才修复。
+- npm 不可用时不阻断发布和其他遥测，但返回明确诊断，避免 Token 空白却不可察觉。
+
+## v1.44.2：稳定运行时与 Skill 发布流水线
+
+- Unix 兼容 bootstrap 不再清空或删除持久 venv，也不再自动升级 pip；唯一生命周期实现收敛到 `_bootstrap.py`。
+- Token 实测只调用已安装的 `ocusage`，不再通过 `npx --yes` 隐式解析或下载包。
+- 新增 `skill_release.py`：单命令机械升版并校验，从同一个 release staging 原子安装本地 Skill、生成并校验对外 ZIP。
+
+## v1.44.1：持久 venv 复用性能修复
+
+- `_bootstrap.py` 在目标 venv 已可导入 PyYAML 时直接 re-exec，不再重复执行 `pip install`。
+- Telemetry Harness 共用相同健康探测与跨平台 venv 路径，只有首次缺失依赖时才安装。
+- 增加回归测试，锁定健康 venv 不重建、不调用 pip 的行为。
+
+## v1.44.0：治理契约与测试结果解析单一事实源
+
+- `gov_common.py` 统一 `.yaml/.yml/.md` 契约发现、Task ID 与内容解析；同任务多格式冲突显式 fail closed。
+- Triangulation、Freshness、Crop、Verify Contract 和 Self Consistency 共用契约语义。
+- Gate、Harness 与 Telemetry 统一使用 `runtime_context.parse_test_output()` 解释八类 runner 输出。
+
+## v1.43.0：治理谓词执行安全化
+
+- 移除治理检查中的动态 `eval/exec` 路径，使用受限 AST 白名单谓词。
+- 旧 Python/assert/setup 检查 fail closed，并同步迁移约束模板和公开文档。
+- 增加 T-146 安全回归，覆盖恶意表达式、路径穿越和默认约束谓词。
 
 ## v1.42.0：Map-first Recon 与长期治理数据增量化
 

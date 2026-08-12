@@ -90,6 +90,17 @@ def collect(args):
     task_id = _normalize_task_id(getattr(args, "task", None) or getattr(args, "module_id", None))
     # contract = 单次意图契约；project = 项目累积（默认：有 --task 则为 contract）
     scope = getattr(args, "scope", None) or ("contract" if task_id else "project")
+    token_measurement = getattr(args, "token_measurement", None) or {
+        "value": getattr(args, "token_usage", 0),
+        "status": "MEASURED" if str(getattr(args, "token_source", "")).startswith("measured") else "UNKNOWN",
+        "source": getattr(args, "token_source", "estimated"),
+        "evidence": [], "measured_at": now, "scope": "legacy_input", "detail": "",
+    }
+    task_tokens_measured = (token_measurement.get("status") == "MEASURED" and
+                            token_measurement.get("scope") == "task_delta")
+    args.token_usage = int(token_measurement.get("value") or 0) if task_tokens_measured else 0
+    args.token_source = str(token_measurement.get("source") or "unavailable")
+    args._token_measurement = token_measurement
 
     # P0 Measurement Contract: task collection derives facts from project artifacts/events.
     # Explicit numeric compatibility inputs are accepted only as DECLARED data.
@@ -149,7 +160,9 @@ def collect(args):
             "scope": scope,  # contract | project
             "task_id": task_id,  # e.g. T-018；project 级为 null
             "module_id": getattr(args, "module_id", None),
-            "tool": getattr(args, "tool", "workbuddy"),
+            "tool": getattr(args, "tool", "other"),
+            "host_tool": token_measurement.get("host_tool") or getattr(args, "tool", "other"),
+            "token_client": token_measurement.get("token_client"),
             # 双向链接字段（落盘时再补全路径）
             "links": {
                 "project_telemetry": "telemetry.json",
@@ -258,8 +271,12 @@ def _raw_summary_from_telemetry(telemetry: dict) -> dict:
         "must_total": int(must_pass.get("must_total", 0) or 0),
         "hitl_count": int(hitl.get("hitl_count", 0) or 0),
         "execution_rounds": int(hitl.get("execution_rounds", 0) or 0),
-        "token_usage": int((telemetry.get("cost") or {}).get("token_usage", 0) or 0),
-        "token_source": str((telemetry.get("cost") or {}).get("token_source", "estimated")),
+        "token_measurement": (telemetry.get("cost") or {}).get("token_measurement") or {
+            "value": int((telemetry.get("cost") or {}).get("token_usage", 0) or 0),
+            "status": "MEASURED" if str((telemetry.get("cost") or {}).get("token_source", "")).startswith("measured") else "UNKNOWN",
+            "source": str((telemetry.get("cost") or {}).get("token_source", "estimated")),
+            "scope": "legacy_input",
+        },
         "new_patterns": int(knowledge.get("new_patterns_this_cycle", 0) or 0),
         "total_patterns": int(knowledge.get("total_patterns_accumulated", 0) or 0),
     }
@@ -313,8 +330,15 @@ def _accumulate_runs_raw(project_dir: Path, run_summaries: list, latest_contract
         raw["must_total"] += int(summary.get("must_total", 0) or 0)
         raw["hitl_count"] += int(summary.get("hitl_count", 0) or 0)
         raw["execution_rounds"] += int(summary.get("execution_rounds", 0) or 0)
-        raw["token_usage"] += int(summary.get("token_usage", 0) or 0)
-        token_sources.add(str(summary.get("token_source", "estimated")))
+        token = summary.get("token_measurement") or {
+            "value": summary.get("token_usage", 0), "status": "UNKNOWN",
+            "source": summary.get("token_source", "estimated"), "scope": "legacy_input",
+        }
+        if token.get("status") == "MEASURED" and token.get("scope") == "task_delta":
+            raw["token_usage"] += int(token.get("value", 0) or 0)
+            token_sources.add(str(token.get("source", "measured")))
+        elif token.get("status") == "CUMULATIVE_SNAPSHOT":
+            token_sources.add("cumulative_snapshot_only")
         raw["new_patterns"] += int(summary.get("new_patterns", 0) or 0)
         # total_patterns 为项目累积快照（最新契约已含历史），取最大值
         tp = int(summary.get("total_patterns", 0) or 0)
@@ -336,8 +360,10 @@ def _accumulate_runs_raw(project_dir: Path, run_summaries: list, latest_contract
         raw["token_source"] = "measured:ocusage"
     elif measured:
         raw["token_source"] = "mixed(measured+estimated)"
+    elif token_sources == {"cumulative_snapshot_only"}:
+        raw["token_source"] = "cumulative_snapshot_only"
     else:
-        raw["token_source"] = "estimated"
+        raw["token_source"] = "unknown"
     return raw
 
 
@@ -799,9 +825,12 @@ def _collect_efficiency_layer(args) -> dict:
     cc_ratio = _safe_ratio(args.context_input_tokens, max(args.context_output_tokens, 1))
 
     # Token 效率：每任务平均 Token
+    measurement = getattr(args, "_token_measurement", {})
+    token_known = (measurement.get("status") == "MEASURED" and
+                   measurement.get("scope") == "task_delta")
     tokens_per_task = (
         args.token_usage / max(args.tasks_assigned or 0, 1)
-        if args.token_usage > 0 else 0
+        if token_known and args.token_usage > 0 else None
     )
 
     # 执行效率：每轮次完成任务数
@@ -820,10 +849,14 @@ def _collect_efficiency_layer(args) -> dict:
             ),
         },
         "token_efficiency": {
-            "tokens_per_task": round(tokens_per_task, 0),
-            "total_tokens": args.token_usage,
+            "tokens_per_task": round(tokens_per_task, 0) if tokens_per_task is not None else None,
+            "display": str(round(tokens_per_task)) if tokens_per_task is not None else "N/A",
+            "total_tokens": args.token_usage if token_known else None,
             "total_tasks": args.tasks_assigned,
-            "health": "EFFICIENT" if tokens_per_task < 10000 else "NORMAL" if tokens_per_task < 25000 else "HIGH",
+            "status": measurement.get("status", "UNKNOWN"),
+            "health": ("UNKNOWN" if tokens_per_task is None else
+                       "EFFICIENT" if tokens_per_task < 10000 else
+                       "NORMAL" if tokens_per_task < 25000 else "HIGH"),
         },
         "execution_efficiency": {
             "tasks_per_round": round(tasks_per_round, 2),
@@ -906,13 +939,20 @@ def _collect_performance(args) -> dict:
 
 
 def _collect_cost(args) -> dict:
+    measurement = getattr(args, "_token_measurement", None) or {
+        "value": args.token_usage, "status": "UNKNOWN", "source": getattr(args, "token_source", "estimated"),
+        "scope": "legacy_input", "evidence": [], "measured_at": None, "detail": "",
+    }
     return {
-        "token_usage": args.token_usage,
+        "token_usage": args.token_usage if measurement.get("status") == "MEASURED" and measurement.get("scope") == "task_delta" else None,
         "token_source": getattr(args, "token_source", "estimated"),
+        "token_measurement": measurement,
         "execution_rounds": args.execution_rounds,
         "hitl_count": args.hitl_count,
         "hitl_rate": _safe_ratio(args.hitl_count, max(args.execution_rounds, 1)),
-        "estimated_cost_usd": round(args.token_usage * 0.000002, 4),
+        "estimated_cost_usd": (round(args.token_usage * 0.000002, 4)
+                               if measurement.get("status") == "MEASURED" and measurement.get("scope") == "task_delta"
+                               else None),
     }
 
 
@@ -948,15 +988,12 @@ _HARNESS_VENV = Path.home() / ".agentic-agile-343" / "venv"
 
 def _can_import_yaml(python: str) -> bool:
     """检测指定 python 解释器是否能 import yaml"""
-    try:
-        r = subprocess.run([python, "-c", "import yaml"], capture_output=True, timeout=10)
-        return r.returncode == 0
-    except Exception:
-        return False
+    from _bootstrap import can_import_yaml
+    return can_import_yaml(python)
 
 
 def _bootstrap_harness_venv() -> str:
-    """创建持久 venv（~/.agentic-agile-343/venv）并安装 pyyaml，返回 python 路径。
+    """创建或复用持久 venv，且仅在 PyYAML 缺失时安装依赖。
 
     解决可移植性问题：skill 分享到其他机器后，系统 python3 未装 pyyaml，
     harness.py _load_yaml 会 ModuleNotFoundError 导致全部门禁 UNEVALUATED。
@@ -964,16 +1001,21 @@ def _bootstrap_harness_venv() -> str:
     本版改为用户主目录下持久 venv，首次自动创建、后续复用。
     """
     import venv as _venv
-    venv_py = _HARNESS_VENV / "bin" / "python"
+    from _bootstrap import venv_python
+    venv_py = venv_python(_HARNESS_VENV)
     if venv_py.exists() and _can_import_yaml(str(venv_py)):
         return str(venv_py)
     try:
         _HARNESS_VENV.parent.mkdir(parents=True, exist_ok=True)
-        _venv.create(_HARNESS_VENV, with_pip=True, clear=True)
-        subprocess.run(
-            [str(venv_py), "-m", "pip", "install", "--quiet", "pyyaml>=6.0"],
-            capture_output=True, timeout=120,
-        )
+        if not venv_py.exists():
+            _venv.create(_HARNESS_VENV, with_pip=True)
+        if not _can_import_yaml(str(venv_py)):
+            completed = subprocess.run(
+                [str(venv_py), "-m", "pip", "install", "--quiet", "pyyaml>=6.0"],
+                capture_output=True, timeout=120,
+            )
+            if completed.returncode != 0:
+                raise RuntimeError("pyyaml installation failed")
         return str(venv_py)
     except Exception as e:
         print(f"⚠️ 无法自动创建 harness venv: {e}", file=sys.stderr)
@@ -1250,6 +1292,8 @@ def main():
     parser.add_argument("--token-source", type=str, default="estimated",
                         help="token 数据来源: measured:ocusage:project / measured:ocusage:client-total / estimated。"
                              "由 fetch_token_usage.sh (@geeeger/ocusage) 实测时自动填写")
+    parser.add_argument("--token-measurement-json", default=None,
+                        help="结构化 Token Measurement Contract JSON")
     parser.add_argument("--execution-rounds", type=int, default=0)
     parser.add_argument("--hitl-count", type=int, default=0)
     parser.add_argument("--gates-passed", type=int, default=0,
@@ -1302,10 +1346,17 @@ def main():
                         help="仅根据已有 runs 重建项目累计遥测（修正聚合口径），不写入任何契约文件")
     parser.add_argument("--module-id", default=None,
                         help="模块 ID（多模块场景下标识遥测来源）")
-    parser.add_argument("--tool", default="workbuddy",
-                        help="使用的 AI 工具: workbuddy | codex | claude-code | other")
+    parser.add_argument("--tool", default="other",
+                        help="宿主 AI 工具标识（如 codex、claude-code 或其他工具）")
 
     args = parser.parse_args()
+    if args.token_measurement_json:
+        try:
+            args.token_measurement = json.loads(args.token_measurement_json)
+        except json.JSONDecodeError as exc:
+            parser.error(f"invalid --token-measurement-json: {exc}")
+        if not isinstance(args.token_measurement, dict):
+            parser.error("--token-measurement-json must be an object")
     # v1.19: --module-id 作为 --task 的 fallback（兼容旧调用习惯）
     if not args.task and args.module_id:
         args.task = args.module_id
@@ -1441,7 +1492,7 @@ def merge_telemetry_files(args) -> dict:
         return {"error": "未找到任何遥测文件", "sources": 0}
 
     merged = {
-        "merged_at": __import__('datetime').datetime.now().isoformat(),
+        "merged_at": datetime.now().isoformat(),
         "sources": len(files),
         "source_files": files,
         "modules": [],

@@ -118,9 +118,10 @@ python cli.py <input.csv> [--config <config.yaml>]
 > |------|------|------|
 > | `shell:` | 执行命令，退出码 0 通过 | `shell: npm run build` |
 > | `http:` | HTTP 请求，检查状态码 | `http: GET /health expect 200` |
-> | `assert:` | Python 表达式，True 通过 | `assert: len(routes) >= 5` |
+> | `predicate:` | 无副作用安全谓词，True 通过 | `predicate: is_file('src/routes.py')` |
 > | `db:` | SQL 查询断言 | `db: SELECT COUNT(*) FROM users` |
 >
+> `assert:` / `setup` 任意 Python 形式已因安全风险停用；自定义业务验证应写入测试，并通过结构化 `command` 调用。
 > 注意：命令中含 `|` 管道符时，用反引号包裹整段（如 ``shell: `npm run dev 2>&1 | head -5` ``），
 > 否则会被 Markdown 表格误切。
 

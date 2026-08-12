@@ -47,9 +47,14 @@ def resolve_test_plan(project_dir: Path | str, timeout: int = 300) -> dict:
 def parse_test_output(runner: str | None, output: str) -> dict:
     result = {"total": 0, "passed": 0, "failed": 0, "errors": 0}
     if runner == "unittest":
-        match = re.search(r"Ran (\d+) tests?", output)
+        matches = list(re.finditer(r"Ran (\d+) tests?", output))
+        match = matches[-1] if matches else None
         result["total"] = int(match.group(1)) if match else 0
-        summary = re.search(r"FAILED \(([^)]+)\)", output)
+        summary = None
+        if match:
+            trailing = output[match.end():]
+            summaries = list(re.finditer(r"FAILED \(([^)]+)\)", trailing))
+            summary = summaries[-1] if summaries else None
         if summary:
             failures = re.search(r"failures=(\d+)", summary.group(1))
             errors = re.search(r"errors=(\d+)", summary.group(1))
@@ -72,7 +77,6 @@ def parse_test_output(runner: str | None, output: str) -> dict:
         result["total"] = int(payload.get("numTotalTests", 0) or 0)
         result["passed"] = int(payload.get("numPassedTests", 0) or 0)
         result["failed"] = int(payload.get("numFailedTests", 0) or 0)
-        result["errors"] = int(payload.get("numPendingTests", 0) or 0)
         return result
     if runner == "go":
         result["passed"] = len(re.findall(r"^--- PASS:", output, re.MULTILINE))
@@ -94,7 +98,7 @@ def parse_test_output(runner: str | None, output: str) -> dict:
         result["passed"] = max(0, result["total"] - result["failed"] - result["errors"])
         return result
     if runner == "dotnet":
-        match = re.search(r"Passed!\s+-\s+Failed:\s*(\d+),\s+Passed:\s*(\d+),\s+Skipped:\s*(\d+),\s+Total:\s*(\d+)", output)
+        match = re.search(r"(?:Passed|Failed)!\s+-\s+Failed:\s*(\d+),\s+Passed:\s*(\d+),\s+Skipped:\s*(\d+),\s+Total:\s*(\d+)", output)
         if match:
             result["failed"], result["passed"], result["total"] = int(match.group(1)), int(match.group(2)), int(match.group(4))
         return result

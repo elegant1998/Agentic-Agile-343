@@ -255,7 +255,7 @@ def load_loop_memory(project_dir: Path, task_id: str) -> str | None:
 
 
 sys.path.insert(0, str(Path(__file__).parent))
-from gov_common import find_contract as _gc_find_contract, parse_contract as _gc_parse_contract
+from gov_common import ContractConflictError, find_contract as _gc_find_contract, parse_contract as _gc_parse_contract
 from context_providers import build_context
 
 
@@ -433,7 +433,7 @@ def crop(project_dir: Path, task_id: str, target_domain: str = None, map_max_ite
             for aid, check in l3["ac"].items():
                 parts.append(f"- [{aid}] `{check}`")
     else:
-        parts.append(f"\n⚠️ 契约文件不存在: governance/contracts/Intent_Contract_{task_id}（.yaml/.md）")
+        parts.append(f"\n⚠️ 契约文件不存在: governance/contracts/Intent_Contract_{task_id}（.yaml/.yml/.md）")
         parts.append("请先创建契约后再裁剪。")
 
     # 代码上下文
@@ -666,8 +666,12 @@ def main():
         return
 
     map_context = build_context(project_dir, max_items=args.map_max_items, include_recommendations=False)
-    prompt = crop(project_dir, args.task, args.domain, args.map_max_items,
-                  not args.no_map_context, map_context=map_context)
+    try:
+        prompt = crop(project_dir, args.task, args.domain, args.map_max_items,
+                      not args.no_map_context, map_context=map_context)
+    except ContractConflictError as exc:
+        print(f"错误: {exc}", file=sys.stderr)
+        sys.exit(2)
 
     # Token 预算硬拦截（Karpathy 规则6 — 在裁剪阶段就拦截，不等到 AS 执行时才发现）
     if args.enforce_budget:
