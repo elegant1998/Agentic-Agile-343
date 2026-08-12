@@ -385,7 +385,7 @@ function renderCertificateEligibility(t) {
     : `🏅 项目自治成熟度证书 · ${computed.label || '未达 L3/L4 发证门槛'}`;
 
   // 默认门户申请页；可通过 localStorage 覆盖（多环境）
-  let applyUrl = computed.apply_url || 'http://agentic.iloveagile.com/project-autonomy-certificate/apply';
+  let applyUrl = computed.apply_url || 'http://agentic.iloveagile.me/project-autonomy-certificate/apply';
   try {
     const override = localStorage.getItem('aasc_cert_apply_url');
     if (override) applyUrl = override;
@@ -415,12 +415,17 @@ function computeCertEligibilityClient(t) {
   const ah = cap.auto_heal_rate || {};
   const mp = cap.must_pass_rate || {};
   const au = cap.autonomy_score || {};
+  if ([ga, fp, ah].some(m => m.value == null || ['UNKNOWN','NOT_APPLICABLE'].includes(m.status))) {
+    return {eligible:false, suggested_level:null, label:'INSUFFICIENT_DATA', cta_enabled:false,
+      cta_text:'关键指标数据不足', apply_url:'#', what_is_it:'证书资格必须由可复验遥测支持。',
+      reasons:['UNKNOWN/NOT_APPLICABLE 不参与证书判定'], metrics:{}};
+  }
   const autonomy = +(au.value || 0);
   const tasks = +(ga.tasks_completed || 0);
   const firstPass = +(fp.value || 0);
   const mustPass = +(mp.value || 0);
   const autoHeal = +(ah.value || 0);
-  const apply_url = 'http://agentic.iloveagile.com/project-autonomy-certificate/apply';
+  const apply_url = 'http://agentic.iloveagile.me/project-autonomy-certificate/apply';
   const what_is_it =
     '项目自治成熟度证书（AASC Project Autonomy Certificate）是组织在智能体敏捷（Agentic Agile）成熟度模型上达到 L3 受控自治 或 L4 自治超进化 后，可申请的项目级认证。证书针对「项目」而非个人；需在<a href="http://agentic.iloveagile.me/">Agentic Agile 智能体敏捷体系认证中心网站</a>申请并签发，可下载 PDF。L1/L2 不能申请证书——仅用本仪表盘作成长反馈。';
   if (autonomy >= 80 && tasks >= 15 && firstPass >= 0.9 && mustPass >= 0.99 && autoHeal >= 0.8) {
@@ -496,13 +501,13 @@ function render(data, mode) {
     <div class="card">
       <h3>🎯 目标准确率</h3>
       <div class="value" style="color:${healthColor(ga.health)}">${ga.display || 'N/A'}</div>
-      <div class="sub">${ga.tasks_completed || 0}/${ga.tasks_assigned || 0} 任务正确完成</div>
+      <div class="sub">${ga.tasks_completed ?? 'N/A'}/${ga.tasks_assigned ?? 'N/A'} 任务正确完成 · ${ga.source || '来源未知'}</div>
       <span class="tag ${healthTag(ga.health)}">${ga.health || 'N/A'}</span>
     </div>
     <div class="card">
       <h3>✨ 首次成功率</h3>
       <div class="value" style="color:${fp.value >= 0.7 ? 'var(--green)' : fp.value >= 0.5 ? 'var(--amber)' : 'var(--red)'}">${fp.display || 'N/A'}</div>
-      <div class="sub">${fp.tasks_first_pass || 0}/${fp.tasks_assigned || 0} 一次通过</div>
+      <div class="sub">${fp.tasks_first_pass ?? 'N/A'}/${fp.tasks_assigned ?? 'N/A'} 一次通过 · ${fp.source || '来源未知'}</div>
       <div class="sub" style="color:var(--text-dim)">${fp.impact_note || ''}</div>
     </div>
     <div class="card">
@@ -541,13 +546,13 @@ function render(data, mode) {
       <div style="display:flex;justify-content:space-between;font-size:0.7rem;">
         <span>目标准确率</span><span style="color:${healthColor(ga.health)}">${ga.display || 'N/A'}</span>
       </div>
-      ${pctBar((ga.value || 0) * 100, 100, p => p >= 80 ? 'var(--green)' : p >= 60 ? 'var(--amber)' : 'var(--red)')}
+      ${ga.value == null ? '<div class="sub">数据不足，不生成百分比</div>' : pctBar(ga.value * 100, 100, p => p >= 80 ? 'var(--green)' : p >= 60 ? 'var(--amber)' : 'var(--red)')}
     </div>
     <div style="margin-bottom:12px;">
       <div style="display:flex;justify-content:space-between;font-size:0.7rem;">
         <span>首次成功率</span><span style="color:${(fp.value || 0) >= 0.7 ? 'var(--green)' : 'var(--amber)'}">${fp.display || 'N/A'}</span>
       </div>
-      ${pctBar((fp.value || 0) * 100, 100, p => p >= 70 ? 'var(--green)' : p >= 50 ? 'var(--amber)' : 'var(--red)')}
+      ${fp.value == null ? '<div class="sub">数据不足，不生成百分比</div>' : pctBar(fp.value * 100, 100, p => p >= 70 ? 'var(--green)' : p >= 50 ? 'var(--amber)' : 'var(--red)')}
     </div>
     <div style="font-size:0.65rem;color:var(--text-dim);margin-top:8px;">
       L3 就绪线: 80% &nbsp;|&nbsp; L2 基线: 60%
@@ -565,7 +570,7 @@ function render(data, mode) {
     <div class="card">
       <h3>🔧 约束自愈率</h3>
       <div class="value" style="color:${healthColor(ah.health)}">${ah.display || 'N/A'}</div>
-      <div class="sub">${ah.auto_healed || 0}/${ah.failures_total || 0} 自动修复</div>
+      <div class="sub">${ah.auto_healed ?? 'N/A'}/${ah.failures_total ?? 'N/A'} 自动修复 · ${ah.source || '来源未知'}</div>
       <span class="tag ${healthTag(ah.health)}">${ah.health || 'N/A'}</span>
     </div>
     <div class="card">
