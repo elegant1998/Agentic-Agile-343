@@ -54,9 +54,11 @@ def run(argv, cwd=None, timeout=30):
         rc = -1
     else:
         rc = -2
-    stdout = (result.get("stdout") or "").strip()
-    stderr = (result.get("stderr") or result.get("detail") or status).strip()
-    return rc, stdout, stderr
+    stdout_raw = result.get("stdout") or ""
+    stderr_raw = result.get("stderr") or result.get("detail") or status
+    stdout = stdout_raw.decode("utf-8", errors="replace") if isinstance(stdout_raw, bytes) else str(stdout_raw)
+    stderr = stderr_raw.decode("utf-8", errors="replace") if isinstance(stderr_raw, bytes) else str(stderr_raw)
+    return rc, stdout.strip(), stderr.strip()
 
 
 def check(label, condition, detail=""):

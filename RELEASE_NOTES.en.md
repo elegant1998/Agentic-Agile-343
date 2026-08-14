@@ -2,14 +2,19 @@
 
 > 🌐 中文版: [RELEASE_NOTES.md](RELEASE_NOTES.md)
 
-# Agentic Agile 3-4-3 Governance Framework · Open Source Edition v1.46.3
+# Agentic Agile 3-4-3 Governance Framework · Open Source Edition v1.46.4
 
 > **Calibrate first, then fight the bosses.** A complete, runnable governance framework for Agentic AI development — fully open source, no reservations. Let AI R&D governance be both offensive and defensive.
 
-- **Version**: `1.46.3`
+- **Version**: `1.46.4`
 - **Release date**: 2026-08-12
 - **License**: Code/templates MIT · Whitepaper CC BY 4.0
 - **Author**: Wang Lijie (无敌哥), AI Governance Architect
+
+## v1.46.4: Verification Gate Fixes (gate_check + change_envelope)
+
+- Fix bytes/str type error in `gate_check.run_python_tests`: `run()` function's `stdout`/`stderr` could be bytes (from `run_command`), causing `join` to fail. Now ensures str is always returned.
+- Fix YAML parsing in `change_envelope._load`: support frontmatter format (`---`-wrapped YAML + Markdown content), no longer fails due to Markdown table `|` characters.
 
 ## v1.46.3: Telemetry Task-ID Resolution Enhancement (telemetry_tracker)
 

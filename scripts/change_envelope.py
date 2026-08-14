@@ -19,6 +19,11 @@ def _load(path: Path) -> dict[str, Any]:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
         raise ValueError(f"Change Envelope not readable: {path}") from exc
+    # 提取 frontmatter（--- 包裹的 YAML 块）
+    if text.lstrip().startswith("---"):
+        parts = text.split("---", 2)
+        if len(parts) >= 3:
+            text = parts[1]
     try:
         data = json.loads(text)
     except json.JSONDecodeError:

@@ -2,14 +2,19 @@
 
 > 🌐 English version: [RELEASE_NOTES.en.md](RELEASE_NOTES.en.md)
 
-# Agentic Agile 3-4-3 治理架构 · 开源版 v1.46.3
+# Agentic Agile 3-4-3 治理架构 · 开源版 v1.46.4
 
 > **先校准、再打怪。** 这是完整、可运行的 Agentic AI 研发治理框架——全部开源，无保留。让 AI 研发治理，进可攻退可守。
 
-- **版本**：`1.46.3`
+- **版本**：`1.46.4`
 - **发布日期**：2026-08-12
 - **许可证**：代码/模板 MIT · 白皮书 CC BY 4.0
 - **作者**：王立杰（无敌哥），AI 治理架构师
+
+## v1.46.4：验证门禁修复（gate_check + change_envelope）
+
+- 修复 `gate_check.run_python_tests` 的 bytes/str 类型错误：`run()` 函数返回的 `stdout`/`stderr` 可能是 bytes（来自 `run_command`），导致 `join` 失败。现在确保始终返回 str。
+- 修复 `change_envelope._load` 的 YAML 解析：支持 frontmatter 格式（`---` 包裹的 YAML + Markdown 内容），不再因 Markdown 表格的 `|` 字符导致解析失败。
 
 ## v1.46.3：遥测任务 ID 解析增强（telemetry_tracker）
 
