@@ -133,6 +133,10 @@ def collect(args):
     capability_layer = _collect_capability_layer(args)
 
     # ── Layer 3: 效率层 ──
+    # T-153: 先跑 cost（含 ESTIMATED 降级），回写 token_usage 到 args 供效率层读取
+    cost = _collect_cost(args)
+    if cost.get("token_usage") is not None and args.token_usage == 0:
+        args.token_usage = cost["token_usage"]
     efficiency_layer = _collect_efficiency_layer(args)
 
     # ── Layer 4: 进化层 ──
@@ -141,8 +145,7 @@ def collect(args):
     # ── 兼容旧版字段 ──
     pipeline = _collect_pipeline(args)
     quality = _collect_quality(args)
-    performance = _collect_performance(args)
-    cost = _collect_cost(args)
+    # T-153: 性能基准已砍掉；cost 已在 efficiency_layer 之前采集并回写 args.token_usage
     governance = _collect_governance(args)
 
     # ── 项目自治成熟度证书资格（仅 L3/L4 可申请）──
@@ -181,7 +184,6 @@ def collect(args):
         # 兼容旧版
         "pipeline": pipeline,
         "quality": quality,
-        "performance": performance,
         "cost": cost,
         "governance": governance,
         # 项目累积时保留 runs 索引（单次为空）
@@ -280,6 +282,27 @@ def _raw_summary_from_telemetry(telemetry: dict) -> dict:
         "new_patterns": int(knowledge.get("new_patterns_this_cycle", 0) or 0),
         "total_patterns": int(knowledge.get("total_patterns_accumulated", 0) or 0),
     }
+
+
+def _estimate_monthly_tasks(run_summaries: list) -> int:
+    """从历史 runs 推导月任务数。取最早和最晚 collected_at 计算跨度天数。
+    加上限保护：密集开发期（如 5 天 40 个任务）线性外推会失真，上限 50 任务/月。
+    """
+    from datetime import datetime as _dt
+    dates = []
+    for r in run_summaries:
+        ca = r.get("collected_at")
+        if ca:
+            try:
+                dates.append(_dt.fromisoformat(ca.replace("Z", "+00:00")))
+            except Exception:
+                pass
+    if len(dates) < 2:
+        return max(len(run_summaries), 1)
+    span_days = max((max(dates) - min(dates)).days, 1)
+    raw_monthly = len(run_summaries) / span_days * 30
+    # 上限保护：密集开发期外推失真，上限 50/月；下限 5/月
+    return max(5, min(50, round(raw_monthly)))
 
 
 def _accumulate_runs_raw(project_dir: Path, run_summaries: list, latest_contract: dict) -> dict:
@@ -383,12 +406,13 @@ class _RawArgs:
         self.token_usage = raw["token_usage"]
         self.new_patterns = raw["new_patterns"]
         self.total_patterns = raw["total_patterns"]
-        # ROI 与上下文压缩未跨契约追踪 → 置 0（INSUFFICIENT_DATA / ROOM_FOR_IMPROVEMENT）
-        self.human_hourly_rate = 0.0
-        self.hours_saved_per_task = 0.0
-        self.ai_monthly_cost = 0.0
-        self.context_input_tokens = 0
-        self.context_output_tokens = 0
+        # T-153: 从 constraints.yaml 读取 cost_model（而非硬编码 0）
+        self._project_dir = raw.get("_project_dir", Path("."))
+        # T-153: 上下文 tokens 从 token_usage 粗估（与 _derive_auto_params 同逻辑）
+        self.context_input_tokens = raw.get("context_input_tokens", 0)
+        self.context_output_tokens = raw.get("context_output_tokens", 0)
+        # T-153: 月任务数（供 ROI 计算）
+        self.estimated_monthly_tasks = raw.get("estimated_monthly_tasks")
         now = datetime.now(timezone.utc).isoformat()
         coverage = raw.get("measurement_coverage", {})
         self._p0_measurements = {}
@@ -426,11 +450,26 @@ def _aggregate_project_from_runs(
         "evolution": {},
         "pipeline": {},
         "quality": {},
-        "performance": {},
         "cost": {},
         "governance": {},
     }
     raw = _accumulate_runs_raw(project_dir, run_summaries, latest)
+    # T-153: 实时采集 token（与 _derive_auto_params 同逻辑）
+    raw["_project_dir"] = str(project_dir)
+    # T-153: 从历史 runs 推导月任务数（供 ROI 计算）
+    raw["estimated_monthly_tasks"] = _estimate_monthly_tasks(run_summaries)
+    try:
+        from token_usage import collect_token_measurement
+        tm = collect_token_measurement(project_dir)
+        tm_val = int(tm.get("value") or 0)
+        if tm_val > 0 and raw["token_usage"] == 0:
+            raw["token_usage"] = tm_val
+            raw["token_source"] = tm.get("source", "estimated")
+            # 上下文压缩比：token_usage ≈ context_input
+            raw["context_input_tokens"] = tm_val
+            raw["context_output_tokens"] = max(1, int(tm_val * 0.15))
+    except Exception:
+        pass
     fake = _RawArgs(raw)
     value_layer = _collect_value_layer(fake)
     capability_layer = _collect_capability_layer(fake)
@@ -463,14 +502,14 @@ def _aggregate_project_from_runs(
         "certificate_eligibility": certificate_eligibility,
         "pipeline": latest.get("pipeline") or {},
         "quality": latest.get("quality") or {},
-        "performance": latest.get("performance") or {},
         "cost": {
-            "token_usage": raw["token_usage"],
+            "token_usage": raw["token_usage"] if raw["token_usage"] > 0 else None,
             "token_source": raw.get("token_source", "estimated"),
+            "token_status": "ESTIMATED" if raw["token_usage"] > 0 else "UNKNOWN",
             "execution_rounds": raw["execution_rounds"],
             "hitl_count": raw["hitl_count"],
             "hitl_rate": _safe_ratio(raw["hitl_count"], max(raw["execution_rounds"], 1)),
-            "estimated_cost_usd": round(raw["token_usage"] * 0.000002, 4),
+            "estimated_cost_usd": round(raw["token_usage"] * 0.000002, 4) if raw["token_usage"] > 0 else None,
         },
         "governance": latest.get("governance") or {},
         "runs": run_summaries,
@@ -513,7 +552,7 @@ def persist_telemetry(args, telemetry: dict) -> dict:
         contract_path = runs_dir / f"telemetry-{task_id}.json"
         rel_contract = f"telemetry/runs/telemetry-{task_id}.json"
         rel_project = "telemetry.json"
-        rel_dash_contract = f"dashboard-{task_id}.html"
+        rel_dash_contract = f"dashboards/dashboard-{task_id}.html"
         telemetry["meta"]["links"] = {
             "project_telemetry": rel_project,
             "contract_telemetry": rel_contract,
@@ -698,41 +737,81 @@ def _collect_value_layer(args) -> dict:
     }
 
 
+def _load_cost_model(project_dir: Path) -> dict:
+    """从 constraints.yaml 读取 cost_model 配置节。缺失时返回空 dict。"""
+    cands = [
+        project_dir / "governance" / "constraints.yaml",
+        project_dir / "constraints.yaml",
+    ]
+    for cand in cands:
+        if cand.exists():
+            try:
+                import yaml
+                data = yaml.safe_load(cand.read_text(encoding="utf-8")) or {}
+                cm = data.get("cost_model")
+                if cm and isinstance(cm, dict):
+                    return cm
+            except Exception:
+                pass
+    return {}
+
+
 def _calc_compound_roi(args) -> dict:
-    """P1: 带失败折现率的复合 ROI"""
-    if not args.human_hourly_rate or not args.hours_saved_per_task:
-        return {"status": "INSUFFICIENT_DATA", "detail": "缺少人力成本参数"}
+    """P1: 月度复合 ROI（T-153 改进：时间维度对齐 + 合理默认值）
+
+    公式：月度 ROI = (月度人力节省 - 月度AI成本) / 月度AI成本 × 100%
+    月度人力节省 = 每任务人力节省 × 月任务数
+    每任务人力节省 = hours_saved_per_task × human_hourly_rate
+    月任务数 = 从历史 runs 自动推导（runs总数 / 跨度天数 × 30），默认 10
+    """
+    project_dir = Path(getattr(args, "_project_dir", "."))
+    cost_model = _load_cost_model(project_dir)
+    human_rate = cost_model.get("human_hourly_rate", 200)       # 默认 ¥200/小时（中级开发者）
+    hours_saved = cost_model.get("hours_saved_per_task", 0.5)   # 默认 0.5 小时/任务（30分钟）
+    ai_monthly = cost_model.get("ai_monthly_cost", 200)         # 默认 ¥200/月（WorkBuddy/Cursor 等）
+
+    if not human_rate or not hours_saved:
+        return {"status": "INSUFFICIENT_DATA", "detail": "缺少成本参数，请在 governance/constraints.yaml 配置 cost_model（human_hourly_rate / hours_saved_per_task / ai_monthly_cost）"}
 
     tasks_completed = max(args.tasks_completed or 0, 0)
     tasks_assigned = max(args.tasks_assigned or 0, 1)
     failure_rate = 1.0 - _safe_ratio(tasks_completed, tasks_assigned)
 
-    # 节省的人力成本
-    saved_labor = tasks_completed * args.hours_saved_per_task * args.human_hourly_rate
+    # 每任务人力节省
+    task_saving = hours_saved * human_rate
 
-    # 失败折现
-    discounted_savings = saved_labor * (1.0 - failure_rate)
+    # 月任务数估算：从 runs 历史推导，或用默认值 10
+    monthly_tasks = getattr(args, "estimated_monthly_tasks", None)
+    if monthly_tasks is None:
+        monthly_tasks = 10  # 保守默认：每月 10 个任务
 
-    # AI 工具成本（月）
-    ai_cost = max(args.ai_monthly_cost, 1)
+    # 月度人力节省（含失败折现）
+    monthly_saving_raw = task_saving * monthly_tasks
+    monthly_saving = monthly_saving_raw * (1.0 - failure_rate)
 
-    # 复合 ROI
-    roi_pct = ((discounted_savings - ai_cost) / ai_cost) * 100
+    # 月度 AI 成本
+    ai_cost = max(ai_monthly, 1)
+
+    # 月度复合 ROI
+    roi_pct = ((monthly_saving - ai_cost) / ai_cost) * 100
 
     return {
         "value": round(roi_pct, 1),
         "display": f"{roi_pct:.1f}%",
         "breakdown": {
-            "saved_labor_raw": round(saved_labor, 2),
+            "task_saving": round(task_saving, 2),
+            "monthly_tasks": monthly_tasks,
+            "monthly_saving_raw": round(monthly_saving_raw, 2),
             "failure_rate": round(failure_rate, 4),
-            "discounted_savings": round(discounted_savings, 2),
+            "monthly_saving": round(monthly_saving, 2),
             "ai_monthly_cost": ai_cost,
         },
-        "formula": "((节省人力 × (1-失败率)) - AI成本) / AI成本 × 100%",
-        "health": "POSITIVE" if roi_pct >= 100 else "MARGINAL" if roi_pct >= 0 else "NEGATIVE",
+        "formula": "((每任务节省 × 月任务数 × (1-失败率)) - 月AI成本) / 月AI成本 × 100%",
+        "health": "EXCELLENT" if roi_pct >= 400 else "POSITIVE" if roi_pct >= 100 else "MARGINAL" if roi_pct >= 0 else "NEGATIVE",
         "note": (
-            "优秀团队通常 3 年内实现 200%-400% 复合 ROI"
-            if roi_pct < 200 else "复合 ROI 处于行业领先水平"
+            f"每任务节省 ¥{task_saving:.0f} × {monthly_tasks} 任务/月 = ¥{monthly_saving_raw:.0f}/月"
+            if roi_pct >= 0 else
+            f"月度节省 ¥{monthly_saving:.0f} < 月AI成本 ¥{ai_cost}，需提升任务量或效率"
         ),
     }
 
@@ -824,20 +903,38 @@ def _collect_efficiency_layer(args) -> dict:
     # P1: 上下文压缩比
     cc_ratio = _safe_ratio(args.context_input_tokens, max(args.context_output_tokens, 1))
 
+    # T-153: context tokens 均为 0 时标 NOT_COLLECTED（砍误导提示）
+    context_not_collected = (args.context_input_tokens == 0 and args.context_output_tokens == 0)
+
     # Token 效率：每任务平均 Token
     measurement = getattr(args, "_token_measurement", {})
     token_known = (measurement.get("status") == "MEASURED" and
                    measurement.get("scope") == "task_delta")
+    # T-153: ESTIMATED 降级 — 有 _token_measurement 且 value > 0，或无 measurement 但 token_usage > 0
+    token_estimated = (not token_known and (
+        (measurement.get("value") and int(measurement.get("value", 0)) > 0) or
+        (not measurement and args.token_usage > 0)
+    ))
     tokens_per_task = (
         args.token_usage / max(args.tasks_assigned or 0, 1)
-        if token_known and args.token_usage > 0 else None
+        if (token_known or token_estimated) and args.token_usage > 0 else None
     )
 
     # 执行效率：每轮次完成任务数
     tasks_per_round = _safe_ratio(args.tasks_completed or 0, max(args.execution_rounds, 1))
 
-    return {
-        "context_compression": {
+    if context_not_collected:
+        context_compression = {
+            "status": "NOT_COLLECTED",
+            "display": "未采集",
+            "ratio": None,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "health": "NOT_COLLECTED",
+            "note": "传入 --context-input-tokens 和 --context-output-tokens 以启用",
+        }
+    else:
+        context_compression = {
             "ratio": round(cc_ratio, 1),
             "display": f"{cc_ratio:.1f}:1",
             "input_tokens": args.context_input_tokens,
@@ -845,15 +942,18 @@ def _collect_efficiency_layer(args) -> dict:
             "health": "EXCELLENT" if cc_ratio >= 5.0 else "GOOD" if cc_ratio >= 3.0 else "ROOM_FOR_IMPROVEMENT",
             "note": (
                 "上下文压缩比 ≥ 5:1 表示裁剪效果优秀"
-                if cc_ratio >= 5.0 else "建议使用 crop_context.py 进一步裁剪上下文"
+                if cc_ratio >= 5.0 else "上下文压缩比偏低"
             ),
-        },
+        }
+
+    return {
+        "context_compression": context_compression,
         "token_efficiency": {
             "tokens_per_task": round(tokens_per_task, 0) if tokens_per_task is not None else None,
             "display": str(round(tokens_per_task)) if tokens_per_task is not None else "N/A",
-            "total_tokens": args.token_usage if token_known else None,
+            "total_tokens": args.token_usage if (token_known or token_estimated) else None,
             "total_tasks": args.tasks_assigned,
-            "status": measurement.get("status", "UNKNOWN"),
+            "status": "MEASURED" if token_known else ("ESTIMATED" if token_estimated else "UNKNOWN"),
             "health": ("UNKNOWN" if tokens_per_task is None else
                        "EFFICIENT" if tokens_per_task < 10000 else
                        "NORMAL" if tokens_per_task < 25000 else "HIGH"),
@@ -943,15 +1043,25 @@ def _collect_cost(args) -> dict:
         "value": args.token_usage, "status": "UNKNOWN", "source": getattr(args, "token_source", "estimated"),
         "scope": "legacy_input", "evidence": [], "measured_at": None, "detail": "",
     }
+    # T-153: 降级处理 — UNKNOWN 但 value > 0 时标 ESTIMATED（而非 None）
+    is_measured = (measurement.get("status") == "MEASURED" and measurement.get("scope") == "task_delta")
+    is_estimated = (not is_measured and measurement.get("value") and int(measurement.get("value", 0)) > 0)
+    token_usage_val = None
+    if is_measured:
+        token_usage_val = args.token_usage
+    elif is_estimated:
+        token_usage_val = int(measurement.get("value", 0))
+
     return {
-        "token_usage": args.token_usage if measurement.get("status") == "MEASURED" and measurement.get("scope") == "task_delta" else None,
+        "token_usage": token_usage_val,
         "token_source": getattr(args, "token_source", "estimated"),
         "token_measurement": measurement,
+        "token_status": "MEASURED" if is_measured else ("ESTIMATED" if is_estimated else "UNKNOWN"),
         "execution_rounds": args.execution_rounds,
         "hitl_count": args.hitl_count,
         "hitl_rate": _safe_ratio(args.hitl_count, max(args.execution_rounds, 1)),
-        "estimated_cost_usd": (round(args.token_usage * 0.000002, 4)
-                               if measurement.get("status") == "MEASURED" and measurement.get("scope") == "task_delta"
+        "estimated_cost_usd": (round(token_usage_val * 0.000002, 4)
+                               if token_usage_val is not None
                                else None),
     }
 
@@ -1236,6 +1346,7 @@ def main():
         description="Agentic Agile 343 遥测收集器 v2.1 — 单次契约 + 项目累积双轨"
     )
     parser.add_argument("--project", default=None, help="项目名称")
+    parser.add_argument("--_project-dir", default=None, help=argparse.SUPPRESS)
     parser.add_argument(
         "--output",
         default="governance/telemetry.json",

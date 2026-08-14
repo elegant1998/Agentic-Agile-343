@@ -30,6 +30,21 @@ def can_import_yaml(python: str | Path) -> bool:
         return False
 
 
+def can_import_coverage(python: str | Path) -> bool:
+    """Return whether an interpreter already has the coverage dependency."""
+    try:
+        completed = subprocess.run(
+            [str(python), "-c", "import coverage"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            shell=False,
+        )
+        return completed.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def prepare_yaml_environment() -> Path:
     """Return a persistent interpreter with PyYAML, installing only when absent."""
     venv_root = Path.home() / ".agentic-agile-343" / "venv"
@@ -41,6 +56,10 @@ def prepare_yaml_environment() -> Path:
     if not can_import_yaml(target):
         subprocess.run([str(target), "-m", "pip", "install", "--disable-pip-version-check",
                         "pyyaml>=6.0"], check=True, capture_output=True, text=True,
+                       timeout=300, shell=False)
+    if not can_import_coverage(target):
+        subprocess.run([str(target), "-m", "pip", "install", "--disable-pip-version-check",
+                        "coverage>=7.0"], check=True, capture_output=True, text=True,
                        timeout=300, shell=False)
     return target
 

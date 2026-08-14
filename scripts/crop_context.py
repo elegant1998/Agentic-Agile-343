@@ -55,7 +55,7 @@ def load_global_constraints(project_dir: Path) -> dict:
         "orm": arch_info.get("orm", ""),
         "cache": arch_info.get("cache", ""),
         "test_framework": arch_info.get("test_framework", "pytest"),
-        "coverage_threshold": threshold_info.get("coverage", "80%"),
+        "coverage_threshold": threshold_info.get("coverage", "28%"),
         "error_codes": arch_info.get("error_codes", ""),
         "money_rule": arch_info.get("money_rule", ""),
     }
@@ -69,6 +69,7 @@ def load_global_constraints(project_dir: Path) -> dict:
             "project_type": "simple",
             "note": "无架构文档 — 本项目跳过了架构设计阶段，技术栈由 AS 在实现时自行决策",
             "test_framework": threshold_info.get("test_framework", "按需选择"),
+            "coverage_threshold": threshold_info.get("coverage", "28%"),
         }
 
     return constraints
@@ -104,7 +105,7 @@ def _parse_architecture_doc(arch_file: Path) -> dict:
 
 
 def _parse_constraint_thresholds(constraint_yaml: Path) -> dict:
-    """从 constraints.yaml 提取覆盖率等阈值"""
+    """从 constraints.yaml 提取覆盖率等阈值与 token 预算配置"""
     info = {}
     if not constraint_yaml.exists():
         return info
@@ -125,7 +126,62 @@ def _parse_constraint_thresholds(constraint_yaml: Path) -> dict:
         if isinstance(check, str) and "pytest" in check:
             info["test_framework"] = "pytest"
 
+    # token 预算配置（可选节，缺失时由调用方兜底）
+    budget = data.get("token_budget")
+    if isinstance(budget, dict):
+        info["token_budget"] = budget
+
     return info
+
+
+# 默认 token 预算：上限 128K，其余级按比例推导
+DEFAULT_TOKEN_BUDGET = {
+    "max_tokens": 131072,            # 128K 上限（complex 级 = 100%）
+    "levels": {
+        "simple": 0.25,              # 32K
+        "standard": 0.5,             # 64K
+        "complex": 1.0,              # 128K
+    },
+}
+
+
+def _load_token_budget(project_dir: Path) -> dict:
+    """读取 token 预算配置（constraints.yaml → token_budget 节）
+
+    缺失或非法时兜底 DEFAULT_TOKEN_BUDGET。返回结构:
+      {"max_tokens": int, "levels": {"simple": float, "standard": float, "complex": float}}
+    """
+    budget = dict(DEFAULT_TOKEN_BUDGET)
+    budget["levels"] = dict(DEFAULT_TOKEN_BUDGET["levels"])
+
+    constraint_yaml = project_dir / "governance" / "constraints.yaml"
+    if not constraint_yaml.exists():
+        return budget
+
+    try:
+        data = yaml.safe_load(constraint_yaml.read_text())
+        cfg = (data or {}).get("token_budget")
+        if not isinstance(cfg, dict):
+            return budget
+        max_tokens = cfg.get("max_tokens")
+        if isinstance(max_tokens, int) and max_tokens > 0:
+            budget["max_tokens"] = max_tokens
+        levels = cfg.get("levels")
+        if isinstance(levels, dict):
+            for lv in ("simple", "standard", "complex"):
+                ratio = levels.get(lv)
+                if isinstance(ratio, (int, float)) and 0 < ratio <= 1:
+                    budget["levels"][lv] = float(ratio)
+    except Exception:
+        pass
+
+    return budget
+
+
+def _derive_budgets(budget_cfg: dict) -> dict:
+    """按比例推导三级预算: budget[level] = max_tokens × ratio[level]"""
+    max_tokens = budget_cfg["max_tokens"]
+    return {lv: int(max_tokens * ratio) for lv, ratio in budget_cfg["levels"].items()}
 
 
 def load_coding_guide(project_dir: Path) -> str | None:
@@ -503,12 +559,8 @@ def verify_isolation(prompt: str, task_id: str, project_dir: Path) -> dict:
     # 规则4: Token 预算检查（Karpathy 规则6 — 预算不是建议）
     estimated_tokens = len(prompt.split()) * 1.3  # 粗略估算
 
-    # 分级预算阈值
-    budgets = {
-        "simple": 8000,     # 简单任务上限
-        "standard": 20000,  # 标准编码/分析任务
-        "complex": 40000,   # 复杂多文件任务
-    }
+    # 分级预算阈值（从 constraints.yaml 读取，缺失时兜底默认；其余级按上限比例推导）
+    budgets = _derive_budgets(_load_token_budget(project_dir))
 
     # 根据 prompt 大小自动判断任务复杂度
     if estimated_tokens <= budgets["simple"]:

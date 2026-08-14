@@ -13,7 +13,7 @@ def find_dashboard_template() -> Path | None:
     candidates = [
         here.parent.parent / "assets" / "dashboard.html",
         Path("governance/dashboard.html"),
-        here.parent.parent / "assets" / "dashboard.html",
+        Path("governance/dashboards/dashboard.html"),
     ]
     for p in candidates:
         if p.is_file() and "TELEMETRY_EMBED_START" in p.read_text(encoding="utf-8", errors="ignore"):

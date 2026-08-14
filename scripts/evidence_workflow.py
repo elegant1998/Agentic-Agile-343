@@ -142,7 +142,7 @@ def _verify_outputs(project: Path, task_id: str, before: dict[Path, tuple[int, i
     run_path = governance / "telemetry" / "runs" / f"telemetry-{task_id}.json"
     project_path = governance / "telemetry.json"
     project_dashboard = governance / "dashboard.html"
-    task_dashboard = governance / f"dashboard-{task_id}.html"
+    task_dashboard = governance / "dashboards" / f"dashboard-{task_id}.html"
     required = [run_path, project_path, project_dashboard, task_dashboard]
 
     for path in required:

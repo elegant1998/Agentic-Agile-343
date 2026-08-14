@@ -213,10 +213,6 @@
 </div>
 <div class="grid grid-2" style="margin-top:12px;">
   <div class="card">
-    <h3>⚡ 性能基准</h3>
-    <div id="perf-table"></div>
-  </div>
-  <div class="card">
     <h3>💰 成本概览</h3>
     <div id="cost-table"></div>
   </div>
@@ -290,18 +286,22 @@ function renderNav(t, mode) {
 
   const nav = document.getElementById('nav-row');
   const links = [];
-  // 纯静态相对链接：dashboard.html ↔ dashboard-T-XXX.html
-  links.push(`<a class="nav-link ${scope === 'project' ? 'active' : ''}" href="dashboard.html">📊 项目总遥测</a>`);
+  // T-153: 子目录路由 — scope=contract 时在 dashboards/ 子目录，需要 ../ 回到根目录
+  // scope=project 时在根目录，需要 dashboards/ 前缀到子目录
+  const rootPrefix = scope === 'contract' ? '../' : '';
+  const subPrefix = scope === 'project' ? 'dashboards/' : '';
+
+  links.push(`<a class="nav-link ${scope === 'project' ? 'active' : ''}" href="${rootPrefix}dashboard.html">📊 项目总遥测</a>`);
   if (taskId) {
-    links.push(`<a class="nav-link ${scope === 'contract' ? 'active' : ''}" href="${contractHtmlName(taskId)}">📄 当前契约 ${taskId}</a>`);
+    links.push(`<a class="nav-link ${scope === 'contract' ? 'active' : ''}" href="${subPrefix}${contractHtmlName(taskId)}">📄 当前契约 ${taskId}</a>`);
   }
   const latestTask = (t.meta && t.meta.latest_task_id) || null;
   if (scope === 'project' && latestTask) {
-    links.push(`<a class="nav-link" href="${contractHtmlName(latestTask)}">↗ 最近一次 ${latestTask}</a>`);
+    links.push(`<a class="nav-link" href="${subPrefix}${contractHtmlName(latestTask)}">↗ 最近一次 ${latestTask}</a>`);
     links.push(`<a class="nav-link" href="#runs-panel">📚 历史契约</a>`);
   }
   if (scope === 'contract') {
-    links.push(`<a class="nav-link" href="dashboard.html">↩ 返回项目总遥测</a>`);
+    links.push(`<a class="nav-link" href="../dashboard.html">↩ 返回项目总遥测</a>`);
   }
   nav.innerHTML = links.join('');
 }
@@ -317,34 +317,59 @@ function renderRunsIndex(t, highlightTask) {
   }
   title.style.display = '';
   panel.style.display = '';
-  const rows = [...runs].reverse().map(r => {
-    const tid = r.task_id || '—';
-    const href = contractHtmlName(tid);
-    const cur = highlightTask && tid === highlightTask ? ' class="current"' : '';
-    const when = r.collected_at ? new Date(r.collected_at).toLocaleString() : '—';
-    return `<tr${cur}>
-      <td><a href="${href}">${tid}</a></td>
-      <td>${when}</td>
-      <td>${r.goal_accuracy || '—'}</td>
-      <td>${r.first_pass_rate || '—'}</td>
-      <td>${r.autonomy_score || '—'}</td>
-      <td><a href="${href}">打开单次 →</a></td>
-    </tr>`;
-  }).join('');
-  document.getElementById('runs-table').innerHTML = `
-    <table>
-      <tr style="color:var(--text-dim);font-size:0.65rem;">
-        <th style="text-align:left">契约</th>
-        <th style="text-align:left">采集时间</th>
-        <th style="text-align:left">准确率</th>
-        <th style="text-align:left">首次成功</th>
-        <th style="text-align:left">自主性</th>
-        <th></th>
-      </tr>
-      ${rows}
-    </table>
-    <div class="meta" style="margin-top:8px;">共 ${runs.length} 次契约 · 每一行均可点击打开对应 dashboard-T-XXX.html 独立大屏（纯静态，无需 Server）</div>
-  `;
+
+  const PAGE_SIZE = 20;
+  const totalPages = Math.ceil(runs.length / PAGE_SIZE);
+  let currentPage = totalPages; // 默认显示最后一页（最新）
+
+  function renderPage(page) {
+    const reversed = [...runs].reverse();
+    const start = (page - 1) * PAGE_SIZE;
+    const pageRuns = reversed.slice(start, start + PAGE_SIZE);
+    const rows = pageRuns.map(r => {
+      const tid = r.task_id || '—';
+      const href = 'dashboards/' + contractHtmlName(tid);
+      const cur = highlightTask && tid === highlightTask ? ' class="current"' : '';
+      const when = r.collected_at ? new Date(r.collected_at).toLocaleString() : '—';
+      return `<tr${cur}>
+        <td><a href="${href}">${tid}</a></td>
+        <td>${when}</td>
+        <td>${r.goal_accuracy || '—'}</td>
+        <td>${r.first_pass_rate || '—'}</td>
+        <td>${r.autonomy_score || '—'}</td>
+        <td><a href="${href}">打开 →</a></td>
+      </tr>`;
+    }).join('');
+
+    const paginationHtml = totalPages > 1 ? `<div style="display:flex;justify-content:center;gap:12px;margin-top:10px;align-items:center;">
+      ${page > 1 ? `<a href="#" onclick="event.preventDefault();window._runsPage(${page-1})" style="color:var(--cyan);font-size:0.7rem;">← 上一页</a>` : '<span style="font-size:0.7rem;color:var(--text-dim);opacity:0.3;">← 上一页</span>'}
+      <span style="font-size:0.7rem;color:var(--text-dim);">第 ${page}/${totalPages} 页 · 共 ${runs.length} 条</span>
+      ${page < totalPages ? `<a href="#" onclick="event.preventDefault();window._runsPage(${page+1})" style="color:var(--cyan);font-size:0.7rem;">下一页 →</a>` : '<span style="font-size:0.7rem;color:var(--text-dim);opacity:0.3;">下一页 →</span>'}
+    </div>` : `<div style="text-align:center;font-size:0.7rem;color:var(--text-dim);margin-top:8px;">共 ${runs.length} 条契约</div>`;
+
+    document.getElementById('runs-table').innerHTML = `
+      <table>
+        <tr style="color:var(--text-dim);font-size:0.65rem;">
+          <th style="text-align:left">契约</th>
+          <th style="text-align:left">采集时间</th>
+          <th style="text-align:left">准确率</th>
+          <th style="text-align:left">首次成功</th>
+          <th style="text-align:left">自主性</th>
+          <th></th>
+        </tr>
+        ${rows}
+      </table>
+      ${paginationHtml}
+    `;
+  }
+
+  window._runsPage = function(page) {
+    if (page < 1 || page > totalPages) return;
+    currentPage = page;
+    renderPage(page);
+  };
+
+  renderPage(currentPage);
 }
 
 
@@ -525,39 +550,97 @@ function render(data, mode) {
 
   // ROI 明细
   if (cr.breakdown) {
+    const bd = cr.breakdown;
     document.getElementById('roi-breakdown').innerHTML = `
       <table>
-        <tr><td>节省人力（原始）</td><td style="text-align:right">¥${cr.breakdown.saved_labor_raw.toLocaleString()}</td></tr>
-        <tr><td>失败折现率</td><td style="text-align:right;color:var(--amber)">${(cr.breakdown.failure_rate * 100).toFixed(1)}%</td></tr>
-        <tr><td>折现后收益</td><td style="text-align:right;color:var(--green)">¥${cr.breakdown.discounted_savings.toLocaleString()}</td></tr>
-        <tr><td>AI 工具月成本</td><td style="text-align:right">¥${cr.breakdown.ai_monthly_cost.toLocaleString()}</td></tr>
-        <tr style="font-weight:700"><td>复合 ROI</td><td style="text-align:right;color:${healthColor(cr.health)}">${cr.display}</td></tr>
+        <tr><td>每任务节省</td><td style="text-align:right">¥${(bd.task_saving || 0).toLocaleString()}</td></tr>
+        <tr><td>月任务数（估算）</td><td style="text-align:right">${bd.monthly_tasks || 'N/A'}</td></tr>
+        <tr><td>月度节省（原始）</td><td style="text-align:right">¥${(bd.monthly_saving_raw || 0).toLocaleString()}</td></tr>
+        <tr><td>失败折现率</td><td style="text-align:right;color:var(--amber)">${((bd.failure_rate || 0) * 100).toFixed(1)}%</td></tr>
+        <tr><td>月度节省（折现后）</td><td style="text-align:right;color:var(--green)">¥${(bd.monthly_saving || 0).toLocaleString()}</td></tr>
+        <tr><td>AI 工具月成本</td><td style="text-align:right">¥${(bd.ai_monthly_cost || 0).toLocaleString()}</td></tr>
+        <tr style="font-weight:700"><td>月度复合 ROI</td><td style="text-align:right;color:${healthColor(cr.health)}">${cr.display}</td></tr>
       </table>
       <div style="font-size:0.65rem;color:var(--text-dim);margin-top:8px;">${cr.note || ''}</div>
     `;
   } else {
     document.getElementById('roi-breakdown').innerHTML =
-      '<div style="color:var(--text-dim);font-size:0.75rem;">需要 --human-hourly-rate 等参数</div>';
+      '<div style="color:var(--text-dim);font-size:0.75rem;">需要在 constraints.yaml 配置 cost_model</div>';
   }
 
-  // 准确率进度条
+  // 准确率趋势（从 runs 历史数据渲染真实趋势）
+  // T-153: 单次契约无趋势数据，显示"不适用"
+  const runs = t.runs || [];
+  const isContract = scope === 'contract';
+
+  if (isContract) {
+    // 单次契约：只显示当前值，趋势面板标"不适用"
+    document.getElementById('accuracy-bars').innerHTML = `
+      <div style="margin-bottom:8px;">
+        <div style="display:flex;justify-content:space-between;font-size:0.7rem;">
+          <span>目标准确率</span><span style="color:${healthColor(ga.health)}">${ga.display || 'N/A'}</span>
+        </div>
+        ${ga.value == null ? '' : pctBar(ga.value * 100, 100, p => p >= 80 ? 'var(--green)' : p >= 60 ? 'var(--amber)' : 'var(--red)')}
+      </div>
+      <div style="margin-bottom:8px;">
+        <div style="display:flex;justify-content:space-between;font-size:0.7rem;">
+          <span>首次成功率</span><span style="color:${(fp.value || 0) >= 0.7 ? 'var(--green)' : 'var(--amber)'}">${fp.display || 'N/A'}</span>
+        </div>
+        ${fp.value == null ? '' : pctBar(fp.value * 100, 100, p => p >= 70 ? 'var(--green)' : p >= 50 ? 'var(--amber)' : 'var(--red)')}
+      </div>
+      <div style="font-size:0.65rem;color:var(--text-dim);margin-top:8px;padding:8px;background:var(--card-bg);border:1px dashed var(--border);border-radius:6px;text-align:center;">
+        📊 趋势对比不适用单个契约 — 请查看项目总遥测（dashboard.html）查看多周期趋势
+      </div>
+    `;
+  } else {
+  const recentRuns = runs.slice(-10);  // 最近 10 个周期
+  const trendHtml = recentRuns.length > 1 ? recentRuns.map(r => {
+    const gVal = parseFloat(r.goal_accuracy) || 0;
+    const fVal = parseFloat(r.first_pass_rate) || 0;
+    const tid = r.task_id || '?';
+    return `<div style="display:flex;align-items:center;gap:8px;margin:3px 0;font-size:0.65rem;">
+      <span style="width:50px;color:var(--text-dim)">${tid}</span>
+      <span style="flex:1;height:6px;background:var(--border);border-radius:3px;overflow:hidden;">
+        <span style="display:block;height:100%;width:${gVal}%;background:${gVal>=80?'var(--green)':gVal>=60?'var(--amber)':'var(--red)'};border-radius:3px;"></span>
+      </span>
+      <span style="width:35px;text-align:right;color:${gVal>=80?'var(--green)':'var(--text-dim)'}">${gVal}%</span>
+      <span style="flex:1;height:6px;background:var(--border);border-radius:3px;overflow:hidden;">
+        <span style="display:block;height:100%;width:${fVal}%;background:${fVal>=70?'var(--green)':fVal>=50?'var(--amber)':'var(--red)'};border-radius:3px;"></span>
+      </span>
+      <span style="width:35px;text-align:right;color:${fVal>=70?'var(--green)':'var(--text-dim)'}">${fVal}%</span>
+    </div>`;
+  }).join('') : '<div class="sub">历史数据不足（需 ≥2 个周期）</div>';
+
+  // 计算趋势 delta
+  const prev = recentRuns.length >= 2 ? recentRuns[recentRuns.length - 2] : null;
+  const cur = recentRuns.length >= 1 ? recentRuns[recentRuns.length - 1] : null;
+  const gaDelta = prev && cur ? (parseFloat(cur.goal_accuracy)||0) - (parseFloat(prev.goal_accuracy)||0) : null;
+  const fpDelta = prev && cur ? (parseFloat(cur.first_pass_rate)||0) - (parseFloat(prev.first_pass_rate)||0) : null;
+  const deltaHtml = gaDelta !== null ? `<div style="font-size:0.6rem;margin-top:4px;">
+    较上周期: 目标准确率 <span style="color:${gaDelta>=0?'var(--green)':'var(--red)'}">${gaDelta>=0?'+':''}${gaDelta.toFixed(1)}%</span>
+    · 首次成功率 <span style="color:${fpDelta>=0?'var(--green)':'var(--red)'}">${fpDelta>=0?'+':''}${fpDelta.toFixed(1)}%</span>
+  </div>` : '';
+
   document.getElementById('accuracy-bars').innerHTML = `
-    <div style="margin-bottom:12px;">
+    <div style="margin-bottom:8px;">
       <div style="display:flex;justify-content:space-between;font-size:0.7rem;">
         <span>目标准确率</span><span style="color:${healthColor(ga.health)}">${ga.display || 'N/A'}</span>
       </div>
       ${ga.value == null ? '<div class="sub">数据不足，不生成百分比</div>' : pctBar(ga.value * 100, 100, p => p >= 80 ? 'var(--green)' : p >= 60 ? 'var(--amber)' : 'var(--red)')}
     </div>
-    <div style="margin-bottom:12px;">
+    <div style="margin-bottom:8px;">
       <div style="display:flex;justify-content:space-between;font-size:0.7rem;">
         <span>首次成功率</span><span style="color:${(fp.value || 0) >= 0.7 ? 'var(--green)' : 'var(--amber)'}">${fp.display || 'N/A'}</span>
       </div>
       ${fp.value == null ? '<div class="sub">数据不足，不生成百分比</div>' : pctBar(fp.value * 100, 100, p => p >= 70 ? 'var(--green)' : p >= 50 ? 'var(--amber)' : 'var(--red)')}
     </div>
-    <div style="font-size:0.65rem;color:var(--text-dim);margin-top:8px;">
-      L3 就绪线: 80% &nbsp;|&nbsp; L2 基线: 60%
-    </div>
+    ${deltaHtml}
+    <div style="font-size:0.65rem;color:var(--text-dim);margin-top:6px;">📈 最近 ${recentRuns.length} 周期趋势</div>
+    <div style="display:flex;font-size:0.55rem;color:var(--text-dim);margin:2px 0;"><span style="width:50px"></span><span style="flex:1;text-align:center">目标</span><span style="width:35px"></span><span style="flex:1;text-align:center">首次</span><span style="width:35px"></span></div>
+    ${trendHtml}
+    <div style="font-size:0.6rem;color:var(--text-dim);margin-top:6px;">L3 就绪线: 80% &nbsp;|&nbsp; L2 基线: 60%</div>
   `;
+  } // end if/else isContract
 
   // ── Layer 2: 能力层 KPI ──
   const cap = t.capability || {};
@@ -639,19 +722,22 @@ function render(data, mode) {
     </div>
     <div class="card">
       <h3>📈 进化趋势</h3>
+      ${isContract ? `<div style="color:var(--text-dim);font-size:0.75rem;padding:8px;background:var(--card-bg);border:1px dashed var(--border);border-radius:6px;text-align:center;">
+        📊 趋势对比不适用单个契约 — 请查看项目总遥测查看多周期进化趋势
+      </div>` : `
       <div style="color:var(--text-dim);font-size:0.75rem;line-height:1.6;">
         ${evo.trend_note || '趋势数据需多周期累积后分析。'}
       </div>
       <div style="margin-top:10px;font-size:0.65rem;color:var(--text-dim);">
         💡 建议每次 SCOPE-V 后采集遥测数据，积累 ≥5 个周期后观察趋势
-      </div>
+      </div>`}
     </div>
   `;
 
   // ── 传统指标（兼容） ──
   const pipe = t.pipeline || {}; const tests = pipe.tests || {};
   const qual = t.quality || {}; const cov = qual.coverage || {};
-  const perf = t.performance || {}; const bench = perf.benchmark || {};
+  const perf = {}; const bench = {}; // T-153: 性能基准已砍掉
   const cost = t.cost || {};
   const gov = t.governance || {};
 
@@ -707,15 +793,7 @@ function render(data, mode) {
     </table>
   `;
 
-  document.getElementById('perf-table').innerHTML = `
-    <table>
-      <tr><td>p50</td><td style="text-align:right">${(bench.p50_ms || 0).toFixed(4)} ms</td></tr>
-      <tr><td style="font-weight:700;color:var(--cyan)">p95</td>
-        <td style="text-align:right;font-weight:700;color:${(bench.p95_ms || 0) <= (bench.threshold_ms || 2) ? 'var(--green)' : 'var(--red)'}">${(bench.p95_ms || 0).toFixed(4)} ms</td></tr>
-      <tr><td>p99</td><td style="text-align:right">${(bench.p99_ms || 0).toFixed(4)} ms</td></tr>
-      <tr><td>阈值</td><td style="text-align:right">≤ ${bench.threshold_ms || 2} ms</td></tr>
-    </table>
-  `;
+  // T-153: 性能基准卡片已移除
 
   const tokenSrc = cost.token_source || 'estimated';
   const srcBadge = tokenSrc.startsWith('measured')
@@ -768,7 +846,6 @@ function loadDemo() {
     },
     pipeline: { tests: { total: 0, passed: 0, failed: 0, errors: 0, pass_rate: 0 } },
     quality: { coverage: { line_rate: 0, threshold: 90.0, status: 'N/A' } },
-    performance: { benchmark: { warmup: 0, samples: 0, p50_ms: 0, p95_ms: 0, p99_ms: 0, max_ms: 0, threshold_ms: 2.0, status: 'N/A' } },
     cost: { token_usage: 0, execution_rounds: 0, hitl_count: 0, hitl_rate: 0, estimated_cost_usd: 0 },
     governance: { gates_passed: 0, gates_total: 9, must_constraints: 0, must_failed: 0, contract_pass_rate: 0, evidence_status: 'UNKNOWN' }
   }, 'project');

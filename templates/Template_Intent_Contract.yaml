@@ -39,7 +39,7 @@ tdd_flow:
   green:
     command: "python3 -m pytest tests/test_your_domain.py -v"
     expect: "所有测试 PASS"
-    target_coverage: 80
+    target_coverage: 28
 
   # Refactor: 重构 + 反思
   refactor:

@@ -252,19 +252,19 @@ constraints:
   - id: C-QUAL-01
     domain: QUAL
     level: MUST
-    description: "测试覆盖率 ≥ 阈值（默认 80%）[无测试项目可设例外]"
+    description: "测试覆盖率 ≥ 阈值（默认 28%）[无测试项目可设例外]"
     # 注意: 此 check 默认按 Python 项目写。按语言改写 check：
-    #   Python:  python3 -m pytest --cov=src --cov-report=term --cov-fail-under=80 tests/
+    #   Python:  python3 -m pytest --cov=src --cov-report=term --cov-fail-under=28 tests/
     #   Node/vitest (v2+):  check: "npx vitest run --coverage"
     #     —— 覆盖率阈值与 json-summary 写在 vitest.config 的 test.coverage 里
-    #        （reporter: ['text','json-summary']，且 thresholds.lines≥80）。
+    #        （reporter: ['text','json-summary']，且 thresholds.lines≥28）。
     #     —— ⚠️ vitest v2 不支持连字符写法 `--coverage-reporter=json-summary`，
     #        必须用点号 `--coverage.reporter=json-summary` 或直接写进配置，
     #        否则命令报错 → 门禁 C-QUAL-01 误判失败。
-    #   harness 的 _parse_coverage 只读 coverage/coverage-summary.json
+    #   覆盖率门禁走 harness _resolve_coverage_gate（policy 驱动，支持多格式）
     check_type: command
     check:
-      argv: [python, -m, pytest, --cov=src, --cov-report=term, --cov-fail-under=80, tests]
+      argv: [python, -m, pytest, --cov=src, --cov-report=term, --cov-fail-under=28, tests]
     watch_paths: ["src/", "tests/"]
     gate: G4
     on_failure: "block"

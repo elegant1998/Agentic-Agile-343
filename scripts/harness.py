@@ -520,15 +520,25 @@ def run_tests(project_dir: Path, params: dict | None = None) -> dict:
     result["runner"] = info["runner"]
     result["status"] = "PASS" if (result["failed"] == 0 and result["passed"] > 0) else (
         "FAIL" if result["passed"] == 0 else "PARTIAL")
-    # 覆盖率（best-effort）
-    cov = _parse_coverage(project_dir)
-    result["coverage"] = cov
-    result["coverage_threshold"] = cov_threshold
-    result["coverage_status"] = "PASS" if cov >= cov_threshold else ("FAIL" if cov > 0 else "UNKNOWN")
+    # 覆盖率门禁（T-152: policy 驱动，取代硬编码单格式 + UNKNOWN 静默放行）
+    gate = _resolve_coverage_gate(project_dir, cov_threshold)
+    result["coverage"] = gate["coverage"]
+    result["coverage_threshold"] = gate["threshold"]
+    result["coverage_status"] = gate["status"]
+    result["coverage_policies"] = gate.get("policies", [])
     bits = [f"runner={info['runner']}",
             f"total={result['total']} passed={result['passed']} failed={result['failed']} errors={result['errors']}"]
-    if cov > 0:
-        bits.append(f"coverage={cov:.1f}% (阈值 {cov_threshold}%)")
+    if gate["status"] == "UNCONFIGURED":
+        # UNCONFIGURED: 明确提示用户缺少什么配置
+        unconfig_hints = [p["hint"] for p in gate.get("policies", []) if p.get("hint")]
+        if unconfig_hints:
+            bits.append(f"覆盖率门禁: UNCONFIGURED — {unconfig_hints[0]}")
+        else:
+            bits.append(f"覆盖率门禁: UNCONFIGURED — 请检查 coverage_policies 配置")
+    elif gate["status"] == "NOT_ENFORCED":
+        bits.append("覆盖率门禁: 未启用（无 coverage_policies）")
+    elif gate["coverage"] > 0:
+        bits.append(f"coverage={gate['coverage']:.1f}% (阈值 {gate['threshold']}%)")
     result["detail"] = "; ".join(bits)
     return result
 
@@ -550,6 +560,259 @@ def _parse_coverage(project_dir: Path) -> float:
         except Exception:
             pass
     return 0.0
+
+
+# ─── Coverage Gate Abstraction Layer (T-152) ───────────────────────────
+
+# 支持的报告格式及对应解析器
+_FORMAT_PARSERS = {}
+
+
+def _parse_json_summary(path: Path) -> float:
+    """解析 coverage/vitest/jest 的 coverage-summary.json，返回 lines pct。"""
+    try:
+        obj = json.loads(path.read_text(encoding="utf-8"))
+        tot = obj.get("total", {})
+        line = tot.get("lines", {})
+        if isinstance(line, dict) and "pct" in line:
+            return float(line["pct"])
+    except Exception:
+        pass
+    return 0.0
+
+
+def _parse_lcov(path: Path) -> float:
+    """解析 LCOV 格式，返回行覆盖率百分比。"""
+    try:
+        text = path.read_text(encoding="utf-8")
+        total_lf = 0
+        total_lh = 0
+        for line in text.splitlines():
+            if line.startswith("LF:"):
+                total_lf += int(line[3:])
+            elif line.startswith("LH:"):
+                total_lh += int(line[3:])
+        if total_lf > 0:
+            return round(total_lh / total_lf * 100, 1)
+    except Exception:
+        pass
+    return 0.0
+
+
+def _parse_jacoco_xml(path: Path) -> float:
+    """解析 JaCoCo XML，返回行覆盖率百分比。"""
+    try:
+        import xml.etree.ElementTree as ET
+        tree = ET.parse(str(path))
+        root = tree.getroot()
+        # JaCoCo 的 counter type="LINE" 记录 missed/covered
+        for counter in root.iter("counter"):
+            if counter.get("type") == "LINE":
+                missed = int(counter.get("missed", 0))
+                covered = int(counter.get("covered", 0))
+                total = missed + covered
+                if total > 0:
+                    return round(covered / total * 100, 1)
+    except Exception:
+        pass
+    return 0.0
+
+
+def _parse_cobertura_xml(path: Path) -> float:
+    """解析 Cobertura XML，返回行覆盖率百分比。"""
+    try:
+        import xml.etree.ElementTree as ET
+        tree = ET.parse(str(path))
+        root = tree.getroot()
+        # Cobertura 在根元素上有 lines-covered / lines-valid
+        lc = root.get("lines-covered")
+        lv = root.get("lines-valid")
+        if lc is not None and lv is not None:
+            total = int(lv)
+            if total > 0:
+                return round(int(lc) / total * 100, 1)
+        # 退而求其次：遍历 class 元素的 line-rate 加权（不精确，兜底）
+        total_lines = 0
+        covered_lines = 0
+        for cls in root.iter("class"):
+            lr = cls.get("line-rate")
+            lines_el = cls.find("lines")
+            if lr is not None and lines_el is not None:
+                count = len(list(lines_el))
+                total_lines += count
+                covered_lines += float(lr) * count
+        if total_lines > 0:
+            return round(covered_lines / total_lines * 100, 1)
+    except Exception:
+        pass
+    return 0.0
+
+
+# 注册解析器
+_FORMAT_PARSERS["json-summary"] = _parse_json_summary
+_FORMAT_PARSERS["lcov"] = _parse_lcov
+_FORMAT_PARSERS["jacoco-xml"] = _parse_jacoco_xml
+_FORMAT_PARSERS["cobertura-xml"] = _parse_cobertura_xml
+
+# 内置 Python 默认 policy（未声明 coverage_policies 时自动套用）
+_BUILTIN_PYTHON_POLICY = {
+    "id": "CP-PYTHON-DEFAULT",
+    "language": "python",
+    "tool": "coverage.py",
+    "artifact": {"path": "coverage/coverage-summary.json", "format": "json-summary"},
+    "required": True,
+}
+
+
+def _load_coverage_policies(project_dir: Path) -> list[dict]:
+    """从 constraints.yaml 读取 coverage_policies；未声明时返回内置 Python 默认 policy。"""
+    import re
+    cands = [
+        project_dir / "governance" / "constraints.yaml",
+        project_dir / "constraints.yaml",
+    ]
+    for cand in cands:
+        if cand.exists():
+            try:
+                import yaml
+                data = yaml.safe_load(cand.read_text(encoding="utf-8")) or {}
+                policies = data.get("coverage_policies")
+                if policies and isinstance(policies, list):
+                    return policies
+            except Exception:
+                pass
+    # 未声明 → 返回内置 Python 默认 policy
+    return [_BUILTIN_PYTHON_POLICY]
+
+
+def _resolve_coverage_policies(project_dir: Path) -> list[dict]:
+    """解析 policies 完整性，返回每项附带 status/hint 的列表。
+
+    status: OK / UNCONFIGURED
+    hint: 缺失项的明确提示（仅 UNCONFIGURED 时有值）
+    """
+    raw = _load_coverage_policies(project_dir)
+    resolved = []
+    for p in raw:
+        entry = dict(p)
+        fmt = p.get("artifact", {}).get("format", "")
+        art_path = p.get("artifact", {}).get("path", "")
+        missing = []
+        if not fmt:
+            missing.append("artifact.format（支持: json-summary / lcov / jacoco-xml / cobertura-xml）")
+        if not art_path:
+            missing.append("artifact.path（覆盖率报告文件路径）")
+        if fmt and fmt not in _FORMAT_PARSERS:
+            missing.append(f"不支持的格式 '{fmt}'；支持: {', '.join(_FORMAT_PARSERS.keys())}")
+        threshold = p.get("threshold")
+        if threshold is None and p.get("required"):
+            missing.append("threshold（覆盖率百分比阈值）")
+
+        if missing:
+            entry["status"] = "UNCONFIGURED"
+            entry["hint"] = (
+                f"coverage_policy '{p.get('id', '?')}' 配置不完整: " + "; ".join(missing)
+                + "。请在 governance/constraints.yaml 的 coverage_policies 中补全。"
+            )
+        else:
+            entry["status"] = "OK"
+            entry["hint"] = None
+        resolved.append(entry)
+    return resolved
+
+
+def _parse_coverage_by_format(fmt: str, artifact_path: Path) -> float:
+    """按格式分发覆盖率解析器；未知格式返回 0.0。"""
+    parser = _FORMAT_PARSERS.get(fmt)
+    if parser and artifact_path.exists():
+        return parser(artifact_path)
+    return 0.0
+
+
+def _resolve_coverage_gate(project_dir: Path, cov_threshold: float) -> dict:
+    """用 policy 驱动的覆盖率门禁，返回 {coverage, threshold, status, detail, policies}。"""
+    policies = _resolve_coverage_policies(project_dir)
+    if not policies:
+        return {
+            "coverage": 0.0,
+            "threshold": cov_threshold,
+            "status": "NOT_ENFORCED",
+            "detail": "未声明 coverage_policies，覆盖率门禁不强制",
+            "policies": [],
+        }
+
+    # 取第一个 required policy 的阈值作为全局门禁阈值
+    # 如果 policy 自带 threshold 则用它，否则用调用方传入的 cov_threshold
+    results = []
+    overall_cov = 0.0
+    overall_status = "NOT_ENFORCED"
+
+    for p in policies:
+        pid = p.get("id", "?")
+        required = p.get("required", False)
+        p_threshold = p.get("threshold", cov_threshold)
+
+        if p["status"] == "UNCONFIGURED":
+            results.append({
+                "id": pid,
+                "status": "UNCONFIGURED",
+                "coverage": 0.0,
+                "threshold": p_threshold,
+                "hint": p["hint"],
+            })
+            if required:
+                overall_status = "UNCONFIGURED"
+            continue
+
+        # policy 完整，尝试解析 artifact
+        fmt = p["artifact"]["format"]
+        art_path = project_dir / p["artifact"]["path"]
+        cov = _parse_coverage_by_format(fmt, art_path)
+
+        if cov == 0.0 and not art_path.exists():
+            results.append({
+                "id": pid,
+                "status": "UNCONFIGURED",
+                "coverage": 0.0,
+                "threshold": p_threshold,
+                "hint": (
+                    f"coverage_policy '{pid}': 产物 {p['artifact']['path']} 不存在。"
+                    f"请先运行 generate 命令生成覆盖率报告。"
+                ),
+            })
+            if required:
+                overall_status = "UNCONFIGURED"
+            continue
+
+        cov_status = "PASS" if cov >= p_threshold else "FAIL"
+        results.append({
+            "id": pid,
+            "status": cov_status,
+            "coverage": cov,
+            "threshold": p_threshold,
+            "hint": None,
+        })
+        overall_cov = max(overall_cov, cov)
+        if required:
+            if overall_status not in ("UNCONFIGURED",):
+                overall_status = cov_status
+
+    # 构建 detail
+    parts = []
+    for r in results:
+        if r["status"] == "UNCONFIGURED":
+            parts.append(f"{r['id']}:UNCONFIGURED")
+        else:
+            parts.append(f"{r['id']}:{r['coverage']:.1f}%({'PASS' if r['status']=='PASS' else 'FAIL'}/{r['threshold']}%)")
+    detail = f"coverage_policies: {', '.join(parts)}" if parts else "无 policy"
+
+    return {
+        "coverage": overall_cov,
+        "threshold": cov_threshold,
+        "status": overall_status,
+        "detail": detail,
+        "policies": results,
+    }
 
 
 def resolve_constraint_conflicts(constraints: list[dict], data: dict) -> list[dict]:

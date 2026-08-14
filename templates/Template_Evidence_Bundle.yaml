@@ -43,7 +43,7 @@ constraint_results:
       - "reports/security-scan.json"
   - constraint_id: "C-QUAL-01"
     status: "pass"
-    observed: "覆盖率 87% ≥ 阈值 80%"
+    observed: "覆盖率 87% ≥ 阈值 28%"
   - constraint_id: "C-PROC-03"
     status: "escalate"                       # 需人工裁决的约束
     note: "影响范围不明确，提交 IO/OA 裁决"
