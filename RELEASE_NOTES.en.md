@@ -2,14 +2,26 @@
 
 > 🌐 中文版: [RELEASE_NOTES.md](RELEASE_NOTES.md)
 
-# Agentic Agile 3-4-3 Governance Framework · Open Source Edition v1.46.0
+# Agentic Agile 3-4-3 Governance Framework · Open Source Edition v1.46.3
 
 > **Calibrate first, then fight the bosses.** A complete, runnable governance framework for Agentic AI development — fully open source, no reservations. Let AI R&D governance be both offensive and defensive.
 
-- **Version**: `1.46.0`
+- **Version**: `1.46.3`
 - **Release date**: 2026-08-12
 - **License**: Code/templates MIT · Whitepaper CC BY 4.0
 - **Author**: Wang Lijie (无敌哥), AI Governance Architect
+
+## v1.46.3: Telemetry Task-ID Resolution Enhancement (telemetry_tracker)
+
+- `telemetry_tracker`'s task-ID regex `TASK_RE` is relaxed to accept namespace-prefixed task IDs (e.g. `PROJ-T-123`) instead of only `T-XXX`, supporting multi-project / multi-tenant task identifiers.
+- New helpers `_artifact_task_id` and `_find_task_artifact` parse the task ID from Evidence Bundle / Intent Contract files, so metrics correctly associate with file-naming conventions or prefixed task IDs rather than failing to merge due to ID shape differences.
+- Reuses `runtime_context.load_trusted_verification_context` for a unified trusted-verification entry point.
+
+## v1.46.2: Unified Test Count Semantics (T-146 close-out)
+
+- `total` is now uniformly `passed + failed`, excluding skipped/ignored/Skipped across all four runners (vitest/jest/cargo/dotnet), aligned with backend trust validation. Previously vitest's `numTotalTests` included skipped (e.g. DB-gated tests skipped via `describe.skipIf(!AGENTIC_DB_PATH)`), so `passed < total` rejected the context and degraded single-task dashboard metrics.
+- Test status is now derived from the `failed` count instead of the process exit code. A beforeAll failure (e.g. adminMembers seed) that exits 1 while business tests all pass no longer reports a false FAIL.
+- Regression: 292 tests green (full suite with `PYTHONPATH=scripts`).
 
 ## v1.45.1: Host-tool identity passthrough at closure (T-149)
 

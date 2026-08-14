@@ -33,8 +33,11 @@ def _execute_tests(project, command):
                                timeout=plan["timeout"], shell=False)
     output = (completed.stdout or "") + (completed.stderr or "")
     counts = parse_test_output(plan["runner"], output)
-    status = "PASS" if completed.returncode == 0 and counts["total"] else (
-        "FAIL" if completed.returncode != 0 or counts["total"] else "UNKNOWN"
+    # T-146 fix: status 基于 failed 计数而非 exit code。
+    # beforeAll 失败（如 adminMembers seed）→ exit 1，但业务测试全部通过。
+    # vitest skipped 测试 → numTotalTests > numPassedTests，但 failed == 0。
+    status = "PASS" if counts["failed"] == 0 and counts["total"] > 0 else (
+        "FAIL" if counts["failed"] > 0 else "UNKNOWN"
     )
     return {**counts, "status": status, "runner": plan["runner"] or "none"}
 

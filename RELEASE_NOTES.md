@@ -2,14 +2,26 @@
 
 > 🌐 English version: [RELEASE_NOTES.en.md](RELEASE_NOTES.en.md)
 
-# Agentic Agile 3-4-3 治理架构 · 开源版 v1.46.0
+# Agentic Agile 3-4-3 治理架构 · 开源版 v1.46.3
 
 > **先校准、再打怪。** 这是完整、可运行的 Agentic AI 研发治理框架——全部开源，无保留。让 AI 研发治理，进可攻退可守。
 
-- **版本**：`1.46.0`
+- **版本**：`1.46.3`
 - **发布日期**：2026-08-12
 - **许可证**：代码/模板 MIT · 白皮书 CC BY 4.0
 - **作者**：王立杰（无敌哥），AI 治理架构师
+
+## v1.46.3：遥测任务 ID 解析增强（telemetry_tracker）
+
+- `telemetry_tracker` 的任务 ID 正则 `TASK_RE` 放宽：支持带命名空间前缀的任务 ID（如 `PROJ-T-123`），不再仅限 `T-XXX` 形态，兼容多项目/多租户下的任务标识。
+- 新增从 Evidence Bundle / Intent Contract 文件解析任务 ID 的函数（`_artifact_task_id`、`_find_task_artifact`），指标可正确关联到文件命名约定或带前缀的任务，不再因任务 ID 形态差异导致指标归并失败。
+- 复用 `runtime_context.load_trusted_verification_context` 可信校验上下文，统一验证入口。
+
+## v1.46.2：测试计数口径统一（T-146 收口）
+
+- 修复测试结果解析的 `total` 口径：`total` 统一为 `passed + failed`，排除 skipped/ignored/Skipped（vitest/jest/cargo/dotnet 四个 runner 一致），与后端信任校验逻辑对齐。此前 vitest 的 `numTotalTests` 会计入 skipped（如 `describe.skipIf(!AGENTIC_DB_PATH)` 跳过的 DB 门控测试），导致 `passed < total` 时 context 被拒、单任务 Dashboard 指标全降级。
+- 修复 `telemetry_workflow` 测试状态判定：不再以进程 exit code 判 PASS/FAIL，改为基于 `failed` 计数。beforeAll 失败（如 adminMembers seed）导致 exit 1 但业务测试全过时，不再误报 FAIL。
+- 回归验证：292 个测试全绿（`PYTHONPATH=scripts` 全量跑）。
 
 ## v1.45.1：收口时宿主工具身份透传（T-149）
 

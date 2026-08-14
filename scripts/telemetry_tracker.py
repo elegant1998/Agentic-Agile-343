@@ -10,6 +10,8 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
+from runtime_context import load_trusted_verification_context
+
 RAW_METRICS = (
     "tasks_assigned", "tasks_completed", "tasks_first_pass",
     "constraint_failures_total", "auto_healed",
@@ -20,7 +22,7 @@ EVENTS = {
     "constraint_resolved", "constraint_reverified", "task_completed", "tdd_red", "formal_verification",
 }
 FORMAL_RESULTS = {"VERIFIED", "CONDITIONAL", "BLOCKED"}
-TASK_RE = re.compile(r"^T-[0-9]{3,}(?:-[A-Z0-9]+)*$")
+TASK_RE = re.compile(r"^(?:[A-Z0-9]+-)*T-[A-Z0-9]+(?:-[A-Z0-9]+)*$")
 
 
 def _now():
@@ -191,6 +193,66 @@ def _relative(path, project):
         return str(path)
 
 
+def _normalized_task_id(value):
+    return str(value or "").strip().strip("`").upper()
+
+
+def _artifact_task_id(path, text, *, evidence=False):
+    patterns = (
+        r"(?:\*\*)?(?:任务\s*ID|task[_\s-]*id)(?:\*\*)?\s*[：:]\s*`?([A-Z0-9][A-Z0-9_-]*)",
+        r"^\s*\|\s*(?:任务\s*ID|task[_\s-]*id)\s*\|\s*`?([A-Z0-9][A-Z0-9_-]*)",
+        r"^\s*#\s*(?:Evidence\s+Bundle\s*[—-]|Intent\s+Contract)\s+`?([A-Z0-9][A-Z0-9_-]*)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.I | re.M)
+        if match:
+            return _normalized_task_id(match.group(1))
+    stem = path.stem
+    prefixes = ("EB-", "Evidence_Bundle_") if evidence else ("Intent_Contract_",)
+    for prefix in prefixes:
+        if stem.lower().startswith(prefix.lower()):
+            stem = stem[len(prefix):]
+            break
+    return _normalized_task_id(stem)
+
+
+def _find_task_artifact(directory, task, *, evidence=False):
+    if not directory.is_dir():
+        return None
+    expected = _normalized_task_id(task)
+    suffixes = {".md"} if evidence else {".md", ".yaml", ".yml"}
+    matches = []
+    for path in sorted(directory.iterdir()):
+        if not path.is_file() or path.suffix.lower() not in suffixes:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        if _artifact_task_id(path, text, evidence=evidence) == expected:
+            matches.append((path, text))
+    return matches[0] if len(matches) == 1 else None
+
+
+def _has_explicit_status(text, status):
+    escaped = re.escape(status)
+    patterns = (
+        rf"^\s*>?\s*(?:\*\*)?状态(?:\*\*)?\s*[：:]\s*\*{{0,2}}{escaped}\b",
+        rf"^\s*\|\s*(?:状态|Status)\s*\|\s*\*{{0,2}}{escaped}\b",
+        rf"^\s*status\s*:\s*['\"]?{escaped}\b",
+    )
+    return any(re.search(pattern, text, re.I | re.M) for pattern in patterns)
+
+
+def _closed_contract_has_signature(text):
+    signer = re.search(
+        r"(?:签署人|确认人)(?:（?IO）?)?(?:\*\*)?\s*[：:|]\s*(?!无\b|N/?A\b|UNKNOWN\b)\S+",
+        text, re.I,
+    )
+    signed_at = re.search(r"签署日期(?:\*\*)?\s*[：:|]\s*\d{4}-\d{2}-\d{2}", text, re.I)
+    return bool(_has_explicit_status(text, "CLOSED") and signer and signed_at)
+
+
 def _signed_contract(project, task):
     """Return the signed contract; completion is derived separately.
 
@@ -199,30 +261,100 @@ def _signed_contract(project, task):
     status; ``tasks_completed`` is derived from passing Evidence instead.
     """
     base = Path(project).resolve() / "governance/contracts"
-    paths = list(base.glob(f"Intent_Contract_{task}.*")) if base.is_dir() else []
+    artifact = _find_task_artifact(base, task)
+    if artifact is None:
+        return None
+    path, text = artifact
     status = re.escape(CONTRACT_AUTHORIZATION_STATUS)
-    for path in paths:
-        text = path.read_text(encoding="utf-8", errors="ignore")
-        if re.search(rf"\b{status}\b", text, re.I) and re.search(r"(?:IO|确认人|意图主理人)", text, re.I):
-            return path
+    signed = re.search(rf"\b{status}\b", text, re.I) and re.search(
+        r"(?:IO|确认人|签署人|意图主理人)", text, re.I
+    )
+    if signed or _closed_contract_has_signature(text):
+        return path
     return None
 
 
-def _passing_evidence(project, task):
-    path = Path(project).resolve() / f"governance/evidence/EB-{task}.md"
-    if not path.is_file():
+def _markdown_cells(line):
+    stripped = line.strip()
+    if not stripped.startswith("|"):
+        return []
+    return [cell.strip() for cell in stripped.strip("|").split("|")]
+
+
+def _is_separator_row(cells):
+    return bool(cells) and all(re.fullmatch(r":?-{3,}:?", cell.replace(" ", "")) for cell in cells)
+
+
+def _is_pass_result(value):
+    raw = str(value or "").strip().strip("*` ")
+    if raw in {"✅", "✓", "✔", "☑"}:
+        return True
+    return bool(re.match(r"^(?:PASS(?:ED)?|APPROVED|VERIFIED)(?:\b|\s|[:：,，])", raw, re.I))
+
+
+def _evidence_declares_pass(text):
+    patterns = (
+        r"^\s*>?\s*(?:\*\*)?状态(?:\*\*)?\s*[：:]\s*.*\b全部\s*AC\s*PASS\b",
+        r"^\s*\|\s*(?:技术裁决|最终裁决|Technical\s+Verdict|Final\s+Verdict)\s*\|\s*(?:PASS|APPROVED|VERIFIED)\b",
+    )
+    return any(re.search(pattern, text, re.I | re.M) for pattern in patterns)
+
+
+def _passing_evidence(project, task, contract=None):
+    base = Path(project).resolve() / "governance/evidence"
+    artifact = _find_task_artifact(base, task, evidence=True)
+    if artifact is None:
         return None
-    text = path.read_text(encoding="utf-8", errors="ignore")
+    path, text = artifact
     ac_results, constraint_results = [], []
+    result_index = None
     for line in text.splitlines():
-        cells = [cell.strip().upper() for cell in line.strip().strip("|").split("|")]
-        if len(cells) < 2:
+        cells = _markdown_cells(line)
+        if len(cells) < 2 or _is_separator_row(cells):
             continue
-        if re.fullmatch(r"AC-[0-9]+", cells[0]):
-            ac_results.append(cells[1])
-        elif re.fullmatch(r"C-[A-Z]+-[0-9]+(?:\s+[^|]*)?", cells[0]):
-            constraint_results.append(cells[1])
-    return path if ac_results and constraint_results and all(x == "PASS" for x in ac_results + constraint_results) else None
+        headers = [cell.strip().lower() for cell in cells]
+        if any(cell in {"结果", "result", "status", "verdict", "裁决"} for cell in headers):
+            result_index = next(
+                index for index, cell in enumerate(headers)
+                if cell in {"结果", "result", "status", "verdict", "裁决"}
+            )
+            continue
+        identifier = cells[0].strip().upper()
+        value_index = result_index if result_index is not None and result_index < len(cells) else 1
+        if re.fullmatch(r"AC-[0-9]+(?:/AC-[0-9]+)*", identifier):
+            ac_results.append(cells[value_index])
+        elif re.match(r"^C-[A-Z]+-[0-9]+(?:\s|$)", identifier):
+            constraint_results.append(cells[value_index])
+    if not ac_results or not all(_is_pass_result(value) for value in ac_results):
+        return None
+    if constraint_results:
+        return path if all(_is_pass_result(value) for value in constraint_results) else None
+    if contract is None:
+        return None
+    contract_text = Path(contract).read_text(encoding="utf-8", errors="ignore")
+    return path if _closed_contract_has_signature(contract_text) and _evidence_declares_pass(text) else None
+
+
+def _passing_verification_context(project, task):
+    base = Path(project).resolve() / "governance/telemetry/verification-runs"
+    if not base.is_dir():
+        return None
+    expected = _normalized_task_id(task)
+    matches = []
+    for path in sorted(base.glob("*.json")):
+        payload, _reason = load_trusted_verification_context(path, project)
+        if payload is None:
+            continue
+        task_id = _normalized_task_id(payload.get("task_id") or path.stem)
+        if task_id != expected:
+            continue
+        total = int(payload.get("total") or 0)
+        passed = int(payload.get("passed") or 0)
+        failed = int(payload.get("failed") or 0)
+        errors = int(payload.get("errors") or 0)
+        if str(payload.get("status") or "").upper() == "PASS" and total > 0 and passed == total and not failed and not errors:
+            matches.append((path, payload))
+    return matches[0] if len(matches) == 1 else None
 
 
 def derive_measurements(project, task_id):
@@ -256,9 +388,17 @@ def derive_measurements(project, task_id):
                 1 if str(first.get("result", "")).upper() == "PASS" else 0,
                 "MEASURED", "execution_event_ledger", first.get("evidence"), first.get("occurred_at"),
             )
-        evidence = _passing_evidence(project, task_id)
+        evidence = _passing_evidence(project, task_id, contract)
         if evidence:
             result["tasks_completed"] = _metric(1, "DERIVED", "passing_evidence", [_relative(evidence, project)], now)
+            if result["tasks_first_pass"]["status"] == "UNKNOWN":
+                run = _passing_verification_context(project, task_id)
+                if run:
+                    run_path, payload = run
+                    result["tasks_first_pass"] = _metric(
+                        1, "DERIVED", "verification_run_context",
+                        [_relative(run_path, project)], payload.get("finished_at") or now,
+                    )
     if ledger.is_file():
         failures = [e for e in events if e.get("event") == "constraint_failed" and e.get("constraint_id")]
         unique = {e["constraint_id"]: e for e in failures}

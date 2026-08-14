@@ -361,7 +361,15 @@ def _accumulate_runs_raw(project_dir: Path, run_summaries: list, latest_contract
             raw["token_usage"] += int(token.get("value", 0) or 0)
             token_sources.add(str(token.get("source", "measured")))
         elif token.get("status") == "CUMULATIVE_SNAPSHOT":
+            # CUMULATIVE_SNAPSHOT 是项目级总量快照，取最大值（最新快照覆盖旧值）
+            val = int(token.get("value", 0) or 0)
+            if val > raw["token_usage"]:
+                raw["token_usage"] = val
             token_sources.add("cumulative_snapshot_only")
+        elif token.get("value"):
+            # fallback：旧 run 有 token_usage 但无 token_measurement（status=UNKNOWN）
+            raw["token_usage"] += int(token.get("value", 0) or 0)
+            token_sources.add(str(token.get("source", "legacy")))
         raw["new_patterns"] += int(summary.get("new_patterns", 0) or 0)
         # total_patterns 为项目累积快照（最新契约已含历史），取最大值
         tp = int(summary.get("total_patterns", 0) or 0)

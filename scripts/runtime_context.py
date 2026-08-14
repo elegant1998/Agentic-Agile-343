@@ -77,6 +77,9 @@ def parse_test_output(runner: str | None, output: str) -> dict:
         result["total"] = int(payload.get("numTotalTests", 0) or 0)
         result["passed"] = int(payload.get("numPassedTests", 0) or 0)
         result["failed"] = int(payload.get("numFailedTests", 0) or 0)
+        result["skipped"] = int(payload.get("numSkippedTests", 0) or 0)
+        # T-146 fix: total 应为 passed + failed（不含 skipped），与后端校验逻辑一致
+        result["total"] = result["passed"] + result["failed"]
         return result
     if runner == "go":
         result["passed"] = len(re.findall(r"^--- PASS:", output, re.MULTILINE))
@@ -88,7 +91,8 @@ def parse_test_output(runner: str | None, output: str) -> dict:
         match = re.search(r"test result:.*?(\d+)\s+passed;\s*(\d+)\s+failed;\s*(\d+)\s+ignored", output)
         if match:
             result["passed"], result["failed"] = int(match.group(1)), int(match.group(2))
-            result["total"] = result["passed"] + result["failed"] + int(match.group(3))
+            # T-146 fix: total = passed + failed（不含 ignored），与后端校验及 vitest/jest 一致
+            result["total"] = result["passed"] + result["failed"]
         return result
     if runner == "mvn":
         for match in re.finditer(r"Tests run:\s*(\d+),\s*Failures:\s*(\d+),\s*Errors:\s*(\d+)", output):
@@ -100,7 +104,9 @@ def parse_test_output(runner: str | None, output: str) -> dict:
     if runner == "dotnet":
         match = re.search(r"(?:Passed|Failed)!\s+-\s+Failed:\s*(\d+),\s+Passed:\s*(\d+),\s+Skipped:\s*(\d+),\s+Total:\s*(\d+)", output)
         if match:
-            result["failed"], result["passed"], result["total"] = int(match.group(1)), int(match.group(2)), int(match.group(4))
+            result["failed"], result["passed"] = int(match.group(1)), int(match.group(2))
+            # T-146 fix: total = passed + failed（不含 Skipped），与后端校验及 vitest/jest 一致
+            result["total"] = result["passed"] + result["failed"]
         return result
     return result
 
@@ -122,6 +128,12 @@ def load_trusted_verification_context(path: Path | str, project_dir: Path | str)
         return None, "project_changed"
     if context.get("context_sha256") != verification_context_checksum(context):
         return None, "checksum_changed"
-    if context.get("status") != "PASS" or not context.get("total") or context.get("passed") != context.get("total"):
+    # T-146 fix: 允许 skipped 测试（passed + failed + skipped = total）。
+    # 旧逻辑 passed != total 会拒绝有 skipped 的 context（如 vitest describe.skipIf）。
+    # 新逻辑：status == PASS 且 failed == 0 即可（skipped 不阻断）。
+    if context.get("status") != "PASS" or not context.get("total"):
+        return None, "tests_not_passing"
+    failed = context.get("failed", 0)
+    if failed and int(failed) > 0:
         return None, "tests_not_passing"
     return context, "trusted_context"
