@@ -12,8 +12,27 @@ from pathlib import Path
 SCHEMA = "context-pack-measurement/v1"
 
 
+def canonical_task_id(task_id: str) -> str:
+    return str(task_id or "").strip().upper()
+
+
 def measurement_path(governance: Path | str, task_id: str) -> Path:
-    return Path(governance) / "telemetry" / "context-measurements" / f"{task_id}.json"
+    return (Path(governance) / "telemetry" / "context-measurements" /
+            f"{canonical_task_id(task_id)}.json")
+
+
+def resolve_measurement_path(governance: Path | str, task_id: str) -> Path:
+    """Resolve canonical output first, then one case-insensitive legacy artifact."""
+    canonical = measurement_path(governance, task_id)
+    if canonical.is_file():
+        return canonical
+    directory = canonical.parent
+    if not directory.is_dir():
+        return canonical
+    expected = canonical.stem.casefold()
+    matches = sorted(path for path in directory.glob("*.json")
+                     if path.stem.casefold() == expected)
+    return matches[0] if len(matches) == 1 else canonical
 
 
 def _payload(text: str) -> dict:
@@ -63,7 +82,7 @@ def build_context_measurement(
     budget.update({"estimated_tokens": injected["estimated_tokens"],
                    "budget_tokens": budget_tokens, "estimator": "utf8-bytes/4-v1"})
     return {
-        "schema": SCHEMA, "task_id": task_id,
+        "schema": SCHEMA, "task_id": canonical_task_id(task_id),
         "project_uid": project_identity(project)["project_uid"],
         "counter": "utf8_bytes", "measured_at": datetime.now(timezone.utc).isoformat(),
         "status": "MEASURED", "source": "crop_context",
@@ -79,7 +98,7 @@ def validate_context_measurement(measurement: dict, task_id: str | None = None,
                                  project_uid: str | None = None) -> bool:
     if not isinstance(measurement, dict) or measurement.get("schema") != SCHEMA:
         return False
-    if task_id and measurement.get("task_id") != task_id:
+    if task_id and canonical_task_id(measurement.get("task_id")) != canonical_task_id(task_id):
         return False
     if project_uid and measurement.get("project_uid") != project_uid:
         return False
@@ -104,4 +123,8 @@ def load_context_measurement(path: Path | str, task_id: str | None = None,
         measurement = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
-    return measurement if validate_context_measurement(measurement, task_id, project_uid) else None
+    if not validate_context_measurement(measurement, task_id, project_uid):
+        return None
+    measurement = dict(measurement)
+    measurement["task_id"] = canonical_task_id(measurement.get("task_id"))
+    return measurement

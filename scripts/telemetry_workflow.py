@@ -15,7 +15,9 @@ from pathlib import Path
 from project_snapshot import ProjectSnapshot
 from runtime_context import parse_test_output, resolve_test_plan, verification_context_checksum
 from token_usage import collect_token_measurement
-from context_measurement import load_context_measurement, measurement_path
+from context_measurement import (
+    canonical_task_id, load_context_measurement, measurement_path, resolve_measurement_path,
+)
 
 
 def _test_command(project):
@@ -44,15 +46,27 @@ def _execute_tests(project, command):
 
 
 def _context_path(governance, task_id):
-    return governance / "telemetry/verification-runs" / f"{task_id}.json"
+    return governance / "telemetry/verification-runs" / f"{canonical_task_id(task_id)}.json"
 
 
 def _token_baseline_path(governance, task_id):
-    return governance / "telemetry/token-baselines" / f"{task_id}.json"
+    return governance / "telemetry/token-baselines" / f"{canonical_task_id(task_id)}.json"
+
+
+def _resolve_token_baseline_path(governance, task_id):
+    canonical = _token_baseline_path(governance, task_id)
+    if canonical.is_file():
+        return canonical
+    if not canonical.parent.is_dir():
+        return canonical
+    matches = sorted(path for path in canonical.parent.glob("*.json")
+                     if path.stem.casefold() == canonical.stem.casefold())
+    return matches[0] if len(matches) == 1 else canonical
 
 
 def capture_token_baseline(project_dir, task_id, host_tool=None, token_clients=None):
     project = Path(project_dir).resolve()
+    task_id = canonical_task_id(task_id)
     measurement = collect_token_measurement(
         project, host_tool=host_tool, token_clients=token_clients, task_id=task_id,
     )
@@ -63,7 +77,8 @@ def capture_token_baseline(project_dir, task_id, host_tool=None, token_clients=N
 
 
 def collect_workflow_token_measurement(project, governance, task_id, host_tool=None, token_clients=None):
-    baseline_path = _token_baseline_path(governance, task_id)
+    task_id = canonical_task_id(task_id)
+    baseline_path = _resolve_token_baseline_path(governance, task_id)
     try:
         baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -82,7 +97,7 @@ def _context_collector_args(governance: Path, task_id: str) -> list[str]:
     from token_usage import project_identity
     expected_uid = project_identity(governance.parent)["project_uid"]
     measurement = load_context_measurement(
-        measurement_path(governance, task_id), task_id, expected_uid
+        resolve_measurement_path(governance, task_id), canonical_task_id(task_id), expected_uid
     )
     if measurement is None:
         return []
@@ -92,6 +107,7 @@ def _context_collector_args(governance: Path, task_id: str) -> list[str]:
 def capture_context_measurement(project_dir: Path | str, task_id: str) -> dict | None:
     """Build the Context Pack and its sidecar at the normal change-prepare boundary."""
     project = Path(project_dir).resolve()
+    task_id = canonical_task_id(task_id)
     from crop_context import crop
 
     path = measurement_path(project / "governance", task_id)

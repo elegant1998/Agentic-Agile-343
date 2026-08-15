@@ -10,6 +10,7 @@ from change_envelope import _load as load_envelope
 from evidence_workflow import finalize_evidence
 from telemetry_tracker import append_formal_verification
 from telemetry_workflow import capture_context_measurement, capture_token_baseline
+from context_measurement import canonical_task_id
 
 def _plan_path(project,task): return Path(project).resolve()/"governance/change"/f"Change_Plan_{task}.yaml"
 def build_plan(project_dir,task_id,targets):
@@ -43,15 +44,23 @@ def _baseline_captured(project,task):
     try:return load_envelope(path).get("status")=="CAPTURED"
     except Exception:return False
 def _preparation_path(project,task):
-    return Path(project)/"governance/telemetry/preparations"/f"{task}.json"
+    return Path(project)/"governance/telemetry/preparations"/f"{canonical_task_id(task)}.json"
+def _resolve_preparation_path(project,task):
+    canonical=_preparation_path(project,task)
+    if canonical.is_file():return canonical
+    if not canonical.parent.is_dir():return canonical
+    matches=sorted(path for path in canonical.parent.glob("*.json") if path.stem.casefold()==canonical.stem.casefold())
+    return matches[0] if len(matches)==1 else canonical
 def _sha256(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 def _preparation_artifacts(project,task):
+    task=canonical_task_id(task)
     return {
         "token_baseline": Path(project)/"governance/telemetry/token-baselines"/f"{task}.json",
         "context_measurement": Path(project)/"governance/telemetry/context-measurements"/f"{task}.json",
     }
 def _write_preparation(project,task):
+    task=canonical_task_id(task)
     artifacts=_preparation_artifacts(project,task)
     missing=[name for name,path in artifacts.items() if not path.is_file()]
     if missing:raise RuntimeError("missing preparation artifacts: "+", ".join(missing))
@@ -69,16 +78,23 @@ def _write_preparation(project,task):
     tmp.replace(path)
     return payload
 def _validate_preparation(project,task):
-    path=_preparation_path(project,task)
+    task=canonical_task_id(task)
+    path=_resolve_preparation_path(project,task)
     if not path.is_file():return False,"PREPARE_MISSING: change prepare has not completed"
     try:payload=json.loads(path.read_text(encoding="utf-8"))
     except (OSError,json.JSONDecodeError):return False,"PREPARE_INVALID: receipt is unreadable"
-    if payload.get("schema")!="change-preparation/v1" or payload.get("task_id")!=task:
+    if payload.get("schema")!="change-preparation/v1" or canonical_task_id(payload.get("task_id"))!=task:
         return False,"PREPARE_INVALID: receipt schema or task binding does not match"
     expected=_preparation_artifacts(project,task);recorded=payload.get("artifacts") or {}
     for name,artifact_path in expected.items():
         item=recorded.get(name) or {}
-        try:valid=artifact_path.is_file() and item.get("path")==str(artifact_path.relative_to(project)) and item.get("sha256")==_sha256(artifact_path)
+        try:
+            recorded_path=(Path(project)/str(item.get("path") or "")).resolve()
+            expected_dir=artifact_path.parent.resolve()
+            valid=(recorded_path.parent==expected_dir and
+                   recorded_path.stem.casefold()==artifact_path.stem.casefold() and
+                   recorded_path.suffix==".json" and recorded_path.is_file() and
+                   item.get("sha256")==_sha256(recorded_path))
         except OSError:valid=False
         if not valid:return False,f"PREPARE_INVALID: {name} is missing, replaced, or belongs to another preparation"
     return True,""

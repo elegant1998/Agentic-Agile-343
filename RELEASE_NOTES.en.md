@@ -2,14 +2,21 @@
 
 > 🌐 中文版: [RELEASE_NOTES.md](RELEASE_NOTES.md)
 
-# Agentic Agile 3-4-3 Governance Framework · Open Source Edition v1.52.0
+# Agentic Agile 3-4-3 Governance Framework · Open Source Edition v1.53.0
 
 > **Calibrate first, then fight the bosses.** A complete, runnable governance framework for Agentic AI development — fully open source, no reservations. Let AI R&D governance be both offensive and defensive.
 
-- **Version**: `1.52.0`
+- **Version**: `1.53.0`
 - **Release date**: 2026-08-15
 - **License**: Code/templates MIT · Whitepaper CC BY 4.0
 - **Author**: Wang Lijie (无敌哥), AI Governance Architect
+
+## v1.53.0: Canonical cross-stage task keys and current Codex thread metering
+
+- `change prepare`, preparation receipts, Token baselines, Context measurements, and `change verify` now share one uppercase canonical task key. Existing lowercase artifacts remain readable case-insensitively, while new artifacts use only the canonical key.
+- Adds a replaceable Codex Usage Provider adapter that binds precisely through `CODEX_THREAD_ID` and reads the active rollout's monotonic counter without relying on its date directory or initial cwd. Missing IDs, ambiguous files, and counter resets still fail closed.
+- Long-running Codex Desktop threads now produce task Token usage from prepare/finalize snapshots of the same thread counter. Structured host snapshots retain highest priority, and WorkBuddy, Claude, Cursor, and other tools continue to integrate through the host-neutral Provider protocol.
+- Adds historical signed-window recovery. Portal task 006 now reports 3,766,736 measured Tokens together with its 6.8:1 Context compression ratio; the complete regression suite passes 329/329.
 
 ## v1.52.0: Unskippable preparation receipts and per-person cost models
 

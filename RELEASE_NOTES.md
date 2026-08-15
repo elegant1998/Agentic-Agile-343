@@ -2,14 +2,21 @@
 
 > 🌐 English version: [RELEASE_NOTES.en.md](RELEASE_NOTES.en.md)
 
-# Agentic Agile 3-4-3 治理架构 · 开源版 v1.52.0
+# Agentic Agile 3-4-3 治理架构 · 开源版 v1.53.0
 
 > **先校准、再打怪。** 这是完整、可运行的 Agentic AI 研发治理框架——全部开源，无保留。让 AI 研发治理，进可攻退可守。
 
-- **版本**：`1.52.0`
+- **版本**：`1.53.0`
 - **发布日期**：2026-08-15
 - **许可证**：代码/模板 MIT · 白皮书 CC BY 4.0
 - **作者**：王立杰（无敌哥），AI 治理架构师
+
+## v1.53.0：跨阶段任务键与 Codex 当前线程计量修复
+
+- `change prepare`、准备凭据、Token baseline、Context measurement 与 `change verify` 统一使用大写规范任务键；既有小写工件可大小写无关读取，新工件只写规范键。
+- 新增可替换的 Codex Usage Provider Adapter，通过 `CODEX_THREAD_ID` 精确读取当前 rollout 的单调计数，不再依赖会话文件所在日期目录或线程创建时的 cwd；缺 ID、多候选与计数回退继续 fail closed。
+- Codex Desktop 持续运行跨日时，任务 Token 仍由同一 thread counter 的 prepare/finalize 差值得出；结构化宿主快照保持最高优先级，WorkBuddy、Claude、Cursor 等其他工具继续通过通用 Provider 协议接入。
+- 新增历史时间窗恢复工具。portal 006 已从签署任务时间窗恢复 `3,766,736` Token，并与 `6.8:1` Context 压缩比同时进入 Dashboard；全量回归 `329/329` 通过。
 
 ## v1.52.0：不可旁路准备凭据与人员成本模型
 

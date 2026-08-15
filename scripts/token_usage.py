@@ -12,7 +12,7 @@ from pathlib import Path
 from command_runner import run_command
 from tool_bootstrap import prepare_ocusage
 from usage_providers import (
-    StructuredFileUsageProvider,
+    CodexRolloutUsageProvider, StructuredFileUsageProvider, canonical_task_id,
     collect_usage_snapshot,
     discover_task_usage_snapshot,
     usage_delta,
@@ -91,7 +91,7 @@ def _infer_host_tool() -> str:
         "workbuddy": ["WORKBUDDY_APP_NAME", "__CFBundleIdentifier=com.workbuddy"],
         "cursor":    ["CURSOR_TRACE_ID", "CURSOR_SESSION_ID"],
         "copilot":   ["COPILOT_LANGUAGE_SERVER", "GITHUB_COPILOT_TOKEN"],
-        "codex":     ["OPENAI_CODEX", "CODEX_HOME"],
+        "codex":     ["CODEX_THREAD_ID", "OPENAI_CODEX", "CODEX_HOME"],
         "claude":    ["CLAUDE_CODE_ENTRYPOINT", "CLAUDE_API_KEY"],
         "opencode":  ["OPENCODE_HOME"],
         "mimocode":  ["MIMOCODE_HOME"],
@@ -139,6 +139,7 @@ def collect_token_measurement(project: Path | str, *, host_tool: str | None = No
                               baseline: dict | None = None, task_id: str | None = None,
                               providers: list | None = None) -> dict:
     identity = project_identity(project)
+    task_id = canonical_task_id(task_id)
     # 精确推断 host_tool：CLI 参数 > 环境变量 > 特征检测
     if not host_tool or host_tool == "other":
         host_tool = _infer_host_tool()
@@ -172,6 +173,12 @@ def collect_token_measurement(project: Path | str, *, host_tool: str | None = No
                 "task_snapshot", "task_delta",
             }:
                 return snapshot
+            return usage_delta(baseline, snapshot) if baseline else snapshot
+    if host_tool == "codex":
+        snapshot = collect_usage_snapshot(
+            identity, task_id, [CodexRolloutUsageProvider()]
+        )
+        if snapshot.get("value") is not None:
             return usage_delta(baseline, snapshot) if baseline else snapshot
     tool = prepare_ocusage()
     base = {"value": None, "status": "UNAVAILABLE", "source": "unavailable",
