@@ -49,6 +49,13 @@ except ImportError:
 
 # ─── 分层遥测模型 ──────────────────────────────────────────
 
+def _is_measured_task_usage(measurement: dict | None) -> bool:
+    measurement = measurement or {}
+    return (
+        measurement.get("status") == "MEASURED"
+        and measurement.get("scope") in {"task_snapshot", "task_delta"}
+    )
+
 def _get_project_uid(project_root: str = ".") -> str:
     """生成或读取项目唯一标识（project_uid）。
     优先从 git remote URL 派生（SHA256 前 16 位，同仓库永远一致，跨公司不撞）；
@@ -96,8 +103,7 @@ def collect(args):
         "source": getattr(args, "token_source", "estimated"),
         "evidence": [], "measured_at": now, "scope": "legacy_input", "detail": "",
     }
-    task_tokens_measured = (token_measurement.get("status") == "MEASURED" and
-                            token_measurement.get("scope") == "task_delta")
+    task_tokens_measured = _is_measured_task_usage(token_measurement)
     args.token_usage = int(token_measurement.get("value") or 0) if task_tokens_measured else 0
     args.token_source = str(token_measurement.get("source") or "unavailable")
     args._token_measurement = token_measurement
@@ -358,7 +364,7 @@ def _accumulate_runs_raw(project_dir: Path, run_summaries: list, latest_contract
             "value": summary.get("token_usage", 0), "status": "UNKNOWN",
             "source": summary.get("token_source", "estimated"), "scope": "legacy_input",
         }
-        if token.get("status") == "MEASURED" and token.get("scope") == "task_delta":
+        if _is_measured_task_usage(token):
             raw["token_usage"] += int(token.get("value", 0) or 0)
             token_sources.add(str(token.get("source", "measured")))
         elif token.get("status") == "CUMULATIVE_SNAPSHOT":
@@ -914,8 +920,7 @@ def _collect_efficiency_layer(args) -> dict:
 
     # Token 效率：每任务平均 Token
     measurement = getattr(args, "_token_measurement", {})
-    token_known = (measurement.get("status") == "MEASURED" and
-                   measurement.get("scope") == "task_delta")
+    token_known = _is_measured_task_usage(measurement)
     # T-153: ESTIMATED 降级 — 有 _token_measurement 且 value > 0，或无 measurement 但 token_usage > 0
     token_estimated = (not token_known and (
         (measurement.get("value") and int(measurement.get("value", 0)) > 0) or
@@ -1075,7 +1080,7 @@ def _collect_cost(args) -> dict:
         "scope": "legacy_input", "evidence": [], "measured_at": None, "detail": "",
     }
     # T-153: 降级处理 — UNKNOWN 但 value > 0 时标 ESTIMATED（而非 None）
-    is_measured = (measurement.get("status") == "MEASURED" and measurement.get("scope") == "task_delta")
+    is_measured = _is_measured_task_usage(measurement)
     is_estimated = (not is_measured and measurement.get("value") and int(measurement.get("value", 0)) > 0)
     token_usage_val = None
     if is_measured:

@@ -1,4 +1,4 @@
-# Agentic Agile 3-4-3 Governance Framework · Open Source Edition v1.51.0
+# Agentic Agile 3-4-3 Governance Framework · Open Source Edition v1.51.1
 
 > 🌐 中文版: [README.md](README.md)
 
@@ -141,6 +141,12 @@ The Dashboard's `ocusage` dependency is installed once into
 `~/.agentic-agile-343/tools/ocusage` during Skill publication and then reused.
 When npm is not on PATH, common local Node/npm runtimes are discovered automatically;
 you can also install Node.js/npm or set `AGENTIC_AGILE_NPM` explicitly.
+
+Telemetry is independent of the AI host. Any host bridge can write the standard task
+snapshot to `governance/telemetry/usage-snapshots/<TASK>.json`, where the workflow
+discovers it automatically; `AGENTIC_AGILE_USAGE_SNAPSHOT` remains an explicit override.
+Only trustworthy direct task measurements or start/end deltas with matching provider,
+counter, project, and task bindings enter task totals. Missing or ambiguous data remains `N/A`.
 
 ### 2. Initialize project governance (solo)
 

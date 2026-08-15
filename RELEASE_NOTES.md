@@ -2,14 +2,21 @@
 
 > 🌐 English version: [RELEASE_NOTES.en.md](RELEASE_NOTES.en.md)
 
-# Agentic Agile 3-4-3 治理架构 · 开源版 v1.51.0
+# Agentic Agile 3-4-3 治理架构 · 开源版 v1.51.1
 
 > **先校准、再打怪。** 这是完整、可运行的 Agentic AI 研发治理框架——全部开源，无保留。让 AI 研发治理，进可攻退可守。
 
-- **版本**：`1.51.0`
+- **版本**：`1.51.1`
 - **发布日期**：2026-08-15
 - **许可证**：代码/模板 MIT · 白皮书 CC BY 4.0
 - **作者**：王立杰（无敌哥），AI 治理架构师
+
+## v1.51.1：任务级 Usage 快照自动发现修复
+
+- 自动发现 `governance/telemetry/usage-snapshots/<TASK>.json`，宿主桥接器不再必须设置 `AGENTIC_AGILE_USAGE_SNAPSHOT`；任务键匹配跨平台大小写无关，多候选时 fail closed。
+- `MEASURED/task_snapshot` 与 `MEASURED/task_delta` 均作为可信任务级事实进入单任务 Dashboard 和项目聚合，不再把直接实测降级为 `ESTIMATED`。
+- 核心仍只消费统一 Usage Provider JSON，不读取 Codex、WorkBuddy、Claude、Cursor 或其他宿主私有数据库。
+- 回归验证：314/314 通过；portal 004 在无环境变量时自动取得 `9,706,767` Token，状态为 `MEASURED`。
 
 ## v1.51.0：跨工具 Usage Provider 与 Context Pack 真实度量
 

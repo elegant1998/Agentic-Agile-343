@@ -2,14 +2,21 @@
 
 > 🌐 中文版: [RELEASE_NOTES.md](RELEASE_NOTES.md)
 
-# Agentic Agile 3-4-3 Governance Framework · Open Source Edition v1.51.0
+# Agentic Agile 3-4-3 Governance Framework · Open Source Edition v1.51.1
 
 > **Calibrate first, then fight the bosses.** A complete, runnable governance framework for Agentic AI development — fully open source, no reservations. Let AI R&D governance be both offensive and defensive.
 
-- **Version**: `1.51.0`
+- **Version**: `1.51.1`
 - **Release date**: 2026-08-15
 - **License**: Code/templates MIT · Whitepaper CC BY 4.0
 - **Author**: Wang Lijie (无敌哥), AI Governance Architect
+
+## v1.51.1: Automatic per-task Usage snapshot discovery
+
+- Automatically discovers `governance/telemetry/usage-snapshots/<TASK>.json`, so host bridges no longer need `AGENTIC_AGILE_USAGE_SNAPSHOT`; task-key matching is case-insensitive across platforms and ambiguous matches fail closed.
+- Treats both `MEASURED/task_snapshot` and `MEASURED/task_delta` as trustworthy task-level facts in task dashboards and project aggregation instead of downgrading direct measurements to `ESTIMATED`.
+- The core still consumes only the shared Usage Provider JSON contract and does not read private databases from Codex, WorkBuddy, Claude, Cursor, or any other host.
+- Regression: 314/314 passed; portal task 004 automatically reports 9,706,767 measured tokens without an environment variable.
 
 ## v1.51.0: Cross-tool Usage Providers and real Context Pack measurement
 

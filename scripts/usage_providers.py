@@ -81,6 +81,22 @@ class StructuredFileUsageProvider:
         return raw
 
 
+def discover_task_usage_snapshot(project: Path | str, task_id: str | None) -> Path | None:
+    """Find one host-neutral per-task snapshot without depending on a host tool."""
+    if not task_id:
+        return None
+    directory = Path(project).resolve() / "governance" / "telemetry" / "usage-snapshots"
+    if not directory.is_dir():
+        return None
+    matches = sorted(
+        path for path in directory.glob("*.json")
+        if path.stem.casefold() == task_id.casefold()
+    )
+    if len(matches) > 1:
+        raise ValueError(f"ambiguous task usage snapshots for {task_id}")
+    return matches[0] if matches else None
+
+
 def collect_usage_snapshot(identity: dict, task_id: str | None,
                            providers: list[UsageProvider]) -> dict:
     failures = []

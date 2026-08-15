@@ -11,7 +11,12 @@ from pathlib import Path
 
 from command_runner import run_command
 from tool_bootstrap import prepare_ocusage
-from usage_providers import StructuredFileUsageProvider, collect_usage_snapshot, usage_delta
+from usage_providers import (
+    StructuredFileUsageProvider,
+    collect_usage_snapshot,
+    discover_task_usage_snapshot,
+    usage_delta,
+)
 
 
 def project_identity(project: Path | str) -> dict:
@@ -140,13 +145,33 @@ def collect_token_measurement(project: Path | str, *, host_tool: str | None = No
     configured_client = os.environ.get("AGENTIC_AGILE_TOKEN_CLIENT")
     if providers is not None:
         snapshot = collect_usage_snapshot(identity, task_id, providers)
+        if snapshot.get("status") == "MEASURED" and snapshot.get("scope") in {
+            "task_snapshot", "task_delta",
+        }:
+            return snapshot
         return usage_delta(baseline, snapshot) if baseline else snapshot
     structured_path = os.environ.get("AGENTIC_AGILE_USAGE_SNAPSHOT")
+    if not structured_path:
+        try:
+            structured_path = discover_task_usage_snapshot(project, task_id)
+        except ValueError as exc:
+            return {
+                "value": None, "status": "UNKNOWN", "source": "unavailable",
+                "evidence": [], "measured_at": None, "scope": "task_snapshot",
+                "host_tool": host_tool, "token_client": None,
+                "provider_id": "structured-file", "counter_id": None,
+                "task_id": task_id, "provider_metadata": {}, **identity,
+                "detail": str(exc),
+            }
     if structured_path:
         snapshot = collect_usage_snapshot(
             identity, task_id, [StructuredFileUsageProvider(structured_path)]
         )
         if snapshot.get("value") is not None:
+            if snapshot.get("status") == "MEASURED" and snapshot.get("scope") in {
+                "task_snapshot", "task_delta",
+            }:
+                return snapshot
             return usage_delta(baseline, snapshot) if baseline else snapshot
     tool = prepare_ocusage()
     base = {"value": None, "status": "UNAVAILABLE", "source": "unavailable",

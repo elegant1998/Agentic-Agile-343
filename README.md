@@ -1,4 +1,4 @@
-# Agentic Agile 3-4-3 治理架构 · 开源版 v1.51.0
+# Agentic Agile 3-4-3 治理架构 · 开源版 v1.51.1
 
 > **让AI交付可治理、可追溯、可验证。** 这是一套 Agentic AI 研发的**完整、可运行治理框架**——从意图契约到证据闭环、从约束门禁到遥测仪表板，全部开源，开箱即用。让 AI 研发治理，进可攻退可守。
 
@@ -140,8 +140,10 @@ npm，会自动发现常见本地 Node/npm；也可安装 Node.js/npm 或通过
 `AGENTIC_AGILE_NPM` 显式指定 npm 路径。
 
 遥测与 AI 工具解耦：`AGENTIC_AGILE_HOST_TOOL` 标识当前宿主，
-`AGENTIC_AGILE_TOKEN_CLIENT` 选择实际用量客户端。项目日累计 Token 只保存为基线；
-只有同客户端、同项目、同自然日的起止差值计入任务统计，缺测或歧义显示 `N/A`。
+`AGENTIC_AGILE_TOKEN_CLIENT` 选择实际用量客户端。任意宿主桥接器可将标准任务快照写入
+`governance/telemetry/usage-snapshots/<TASK>.json`，工作流会自动发现；环境变量
+`AGENTIC_AGILE_USAGE_SNAPSHOT` 可显式覆盖。项目日累计 Token 只保存为基线；只有可信的
+任务直接实测，或同 Provider、counter、项目、任务绑定的起止差值，才计入任务统计，缺测或歧义显示 `N/A`。
 
 ### 2. 初始化项目治理（单人）
 
