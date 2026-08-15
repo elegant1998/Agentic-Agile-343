@@ -3,7 +3,7 @@ name: agentic-agile-343
 description: "Agentic-Agile-343，让 AI 研发治理进可攻退可守。用户说既有项目先看看、风险评估或初始化治理、门禁误报、分析文件影响范围、本次只允许修改某些文件、没有测试先固定现有行为、修改已有功能、报告 Bug/缺陷/回归并要求修复、设计多层验证、生成证据包并完成任务，或准备发布、生成发布清单、检查制品和证据是否一致、记录已发布/回滚时使用。提供 3-4-3、Recon、安全变更、Verification Plan、Evidence 遥测收口、Release Manifest、TDD、证据与遥测闭环。Use for existing-project governance, safe changes, bug/regression repair, risk-driven verification, evidence-to-telemetry finalization, proof-carrying release readiness, artifact/evidence binding, and release/rollback fact recording."
 metadata:
   display_name: "Agentic Agile 343"
-  version: "1.51.1"
+  version: "1.51.2"
   author: "王立杰-无敌哥"
   created: "2025-07-20"
 ---

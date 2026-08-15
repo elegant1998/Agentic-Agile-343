@@ -2,14 +2,20 @@
 
 > 🌐 English version: [RELEASE_NOTES.en.md](RELEASE_NOTES.en.md)
 
-# Agentic Agile 3-4-3 治理架构 · 开源版 v1.51.1
+# Agentic Agile 3-4-3 治理架构 · 开源版 v1.51.2
 
 > **先校准、再打怪。** 这是完整、可运行的 Agentic AI 研发治理框架——全部开源，无保留。让 AI 研发治理，进可攻退可守。
 
-- **版本**：`1.51.1`
+- **版本**：`1.51.2`
 - **发布日期**：2026-08-15
 - **许可证**：代码/模板 MIT · 白皮书 CC BY 4.0
 - **作者**：王立杰（无敌哥），AI 治理架构师
+
+## v1.51.2：Node CLI 与旧 Python 自举兼容修复
+
+- Vitest、Jest 与 TypeScript 门禁优先使用自动发现的 `node` 直接执行项目本地 CLI，不再依赖 `npx` shebang 从 PATH 二次寻找 Node；宿主内置运行时、独立 Node 和无 npm 的运行环境均可稳定验证。
+- 保留 npx 作为项目未安装本地 CLI 时的兼容回退，不绑定 WorkBuddy、Codex 或任何单一 AI 工具目录。
+- `_bootstrap.py` 延迟解析现代类型注解，macOS 旧系统 Python 可先完成依赖检查并切换到持久专用 venv，不再在自举前因语法兼容失败。
 
 ## v1.51.1：任务级 Usage 快照自动发现修复
 

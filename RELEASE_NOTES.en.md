@@ -2,14 +2,20 @@
 
 > 🌐 中文版: [RELEASE_NOTES.md](RELEASE_NOTES.md)
 
-# Agentic Agile 3-4-3 Governance Framework · Open Source Edition v1.51.1
+# Agentic Agile 3-4-3 Governance Framework · Open Source Edition v1.51.2
 
 > **Calibrate first, then fight the bosses.** A complete, runnable governance framework for Agentic AI development — fully open source, no reservations. Let AI R&D governance be both offensive and defensive.
 
-- **Version**: `1.51.1`
+- **Version**: `1.51.2`
 - **Release date**: 2026-08-15
 - **License**: Code/templates MIT · Whitepaper CC BY 4.0
 - **Author**: Wang Lijie (无敌哥), AI Governance Architect
+
+## v1.51.2: Node CLI and legacy Python bootstrap compatibility
+
+- Vitest, Jest, and TypeScript gates now prefer a discovered `node` executable with the project's installed CLI entrypoint instead of relying on an `npx` shebang to find Node again through PATH. Host-bundled runtimes, standalone Node, and npm-free runtimes can verify reliably.
+- npx remains a compatibility fallback when the project-local CLI is absent; no WorkBuddy, Codex, or other single AI-host directory is required.
+- `_bootstrap.py` defers modern type-annotation evaluation so older macOS system Python can perform dependency checks and switch to the persistent dedicated venv before parsing fails.
 
 ## v1.51.1: Automatic per-task Usage snapshot discovery
 

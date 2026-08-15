@@ -22,7 +22,7 @@ from pathlib import Path
 from datetime import datetime
 
 from command_runner import run_command
-from runtime_context import find_node_tool, parse_test_output, resolve_test_plan
+from runtime_context import find_node_tool, parse_test_output, resolve_project_node_cli, resolve_test_plan
 
 
 # SCOPE-V 的五道机械门检查控制状态转换，而不是增加线性流程阶段。
@@ -228,9 +228,12 @@ def gate_coding(task_id, project_dir):
     if test_files:
         pkg = project_dir / "package.json"
         if pkg.exists():
-            npx = find_node_tool("npx") or "npx"
+            command = resolve_project_node_cli(project_dir, "vitest/vitest.mjs")
+            if command is None:
+                npx = find_node_tool("npx") or "npx"
+                command = [npx, "vitest"]
             rc, out, err = run(
-                [npx, "vitest", "run", "--reporter=json"],
+                [*command, "run", "--reporter=json"],
                 cwd=str(project_dir),
                 timeout=60,
             )
@@ -315,8 +318,11 @@ def gate_prove(task_id, project_dir):
 
     # 4. tsc / build 通过
     if pkg.exists():
-        npx = find_node_tool("npx") or "npx"
-        rc, out, err = run([npx, "tsc", "--noEmit"], cwd=str(project_dir), timeout=60)
+        command = resolve_project_node_cli(project_dir, "typescript/bin/tsc")
+        if command is None:
+            npx = find_node_tool("npx") or "npx"
+            command = [npx, "tsc"]
+        rc, out, err = run([*command, "--noEmit"], cwd=str(project_dir), timeout=60)
         detail = (out or err).splitlines()[0][:80] if (out or err) else "有类型错误"
         all_pass &= check("TypeScript 编译通过", rc == 0,
                           detail)

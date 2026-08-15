@@ -10,6 +10,16 @@ from pathlib import Path
 from tool_bootstrap import find_node_tool
 
 
+def resolve_project_node_cli(project_dir: Path | str, relative_cli: str) -> list[str] | None:
+    """Run an installed package CLI through Node without relying on npm's PATH."""
+    project = Path(project_dir).resolve()
+    cli = project / "node_modules" / relative_cli
+    node = find_node_tool("node")
+    if node and cli.is_file():
+        return [node, str(cli)]
+    return None
+
+
 def resolve_test_plan(project_dir: Path | str, timeout: int = 300) -> dict:
     project = Path(project_dir).resolve()
     package = project / "package.json"
@@ -22,9 +32,11 @@ def resolve_test_plan(project_dir: Path | str, timeout: int = 300) -> dict:
             npx = find_node_tool("npx") or "npx"
             npm = find_node_tool("npm") or "npm"
             if "vitest" in script:
-                return {"runner": "vitest", "argv": [npx, "vitest", "run", "--reporter=json"], "kind": "node", "cwd": ".", "timeout": timeout}
+                prefix = resolve_project_node_cli(project, "vitest/vitest.mjs") or [npx, "vitest"]
+                return {"runner": "vitest", "argv": [*prefix, "run", "--reporter=json"], "kind": "node", "cwd": ".", "timeout": timeout}
             if "jest" in script:
-                return {"runner": "jest", "argv": [npx, "jest", "--json"], "kind": "node", "cwd": ".", "timeout": timeout}
+                prefix = resolve_project_node_cli(project, "jest/bin/jest.js") or [npx, "jest"]
+                return {"runner": "jest", "argv": [*prefix, "--json"], "kind": "node", "cwd": ".", "timeout": timeout}
             return {"runner": "npm", "argv": [npm, "test"], "kind": "node", "cwd": ".", "timeout": timeout}
     tests = project / "tests"
     if tests.is_dir() or list(project.glob("test_*.py")):

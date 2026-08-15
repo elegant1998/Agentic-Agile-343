@@ -1,4 +1,6 @@
 """Python-native self-contained dependency bootstrap for every platform."""
+from __future__ import annotations
+
 import os
 import subprocess
 import sys
