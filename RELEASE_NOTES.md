@@ -2,14 +2,21 @@
 
 > 🌐 English version: [RELEASE_NOTES.en.md](RELEASE_NOTES.en.md)
 
-# Agentic Agile 3-4-3 治理架构 · 开源版 v1.46.4
+# Agentic Agile 3-4-3 治理架构 · 开源版 v1.50.0
 
 > **先校准、再打怪。** 这是完整、可运行的 Agentic AI 研发治理框架——全部开源，无保留。让 AI 研发治理，进可攻退可守。
 
-- **版本**：`1.46.4`
-- **发布日期**：2026-08-12
+- **版本**：`1.50.0`
+- **发布日期**：2026-08-15
 - **许可证**：代码/模板 MIT · 白皮书 CC BY 4.0
 - **作者**：王立杰（无敌哥），AI 治理架构师
+
+## v1.50.0：跨 AI 工具独立收口
+
+- Evidence、Telemetry、Closing Gate 与共享制品发现统一支持项目命名空间任务 ID（如 `portal-T-course-reframe-001`），并以大小写无关方式关联契约、证据、遥测和意图图谱。
+- `refresh-only` 补齐项目路径参数，修复 ROI 计算的 `Path(None)`；项目累计 Token 快照不再错误归入具体任务用量。
+- Node 测试计划和直接门禁统一复用有界的本地 `node`/`npm`/`npx` 自动发现，支持 PATH、Homebrew、nvm、fnm、Volta 与常见本地运行时，不依赖 WorkBuddy、Codex 或其他单一 AI 工具。
+- 真实 portal 项目完成 `evidence finalize`：正式验证为 `VERIFIED`，单任务/项目遥测和 Dashboard 均成功刷新；全量回归 301/301 通过。
 
 ## v1.46.4：验证门禁修复（gate_check + change_envelope）
 

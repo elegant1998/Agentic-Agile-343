@@ -2,14 +2,21 @@
 
 > 🌐 中文版: [RELEASE_NOTES.md](RELEASE_NOTES.md)
 
-# Agentic Agile 3-4-3 Governance Framework · Open Source Edition v1.46.4
+# Agentic Agile 3-4-3 Governance Framework · Open Source Edition v1.50.0
 
 > **Calibrate first, then fight the bosses.** A complete, runnable governance framework for Agentic AI development — fully open source, no reservations. Let AI R&D governance be both offensive and defensive.
 
-- **Version**: `1.46.4`
-- **Release date**: 2026-08-12
+- **Version**: `1.50.0`
+- **Release date**: 2026-08-15
 - **License**: Code/templates MIT · Whitepaper CC BY 4.0
 - **Author**: Wang Lijie (无敌哥), AI Governance Architect
+
+## v1.50.0: AI-host-independent closure
+
+- Evidence, Telemetry, the Closing Gate, and shared artifact discovery now consistently support project-namespaced task IDs such as `portal-T-course-reframe-001`, with case-insensitive joins across contracts, evidence, telemetry, and the Intent Graph.
+- Refresh-only collection now carries the project path into derived metrics, fixing `Path(None)` in ROI calculation; cumulative project Token snapshots are no longer attributed to individual tasks.
+- Node test plans and direct gates share bounded local `node`/`npm`/`npx` discovery across PATH, Homebrew, nvm, fnm, Volta, and common local runtimes, without depending on WorkBuddy, Codex, or any single AI host.
+- A real portal `evidence finalize` completed with `VERIFIED` formal evidence and refreshed task/project telemetry and dashboards; the full regression suite passed 301/301.
 
 ## v1.46.4: Verification Gate Fixes (gate_check + change_envelope)
 

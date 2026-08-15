@@ -24,7 +24,7 @@ from gov_common import find_contract, find_evidence_bundle
 from telemetry_tracker import append_formal_verification, formal_result_from_evidence
 
 
-TASK_ID_PATTERN = re.compile(r"^T-[0-9]{3,}(?:-[A-Z0-9]+)*$")
+TASK_ID_PATTERN = re.compile(r"^(?:[A-Z0-9]+-)*T-[A-Z0-9]+(?:-[A-Z0-9]+)*$")
 AC_RESULT_PATTERN = re.compile(
     r"\bAC-[0-9]+\b[^\n]*(?:PASS|FAIL|UNKNOWN|CONDITIONAL|ESCALATED)", re.IGNORECASE
 )
@@ -64,7 +64,7 @@ def _progress(stage: str, status: str, started: float | None = None) -> None:
 def _validate_task_id(raw: str) -> str:
     task_id = str(raw or "").strip().upper()
     if not TASK_ID_PATTERN.fullmatch(task_id):
-        raise ValueError("task id must match T-XXX or T-XXX-SUFFIX")
+        raise ValueError("task id must contain a safe T-* task key, optionally with a project prefix")
     return task_id
 
 

@@ -238,10 +238,12 @@ def run(task_id, governance_dir, timeout=300, refresh_only=False, prepare_only=F
         collector = Path(__file__).resolve().parent / "collect_telemetry.py"
         token_measurement = collect_workflow_token_measurement(
             project, governance, task_id, host_tool, token_clients)
+        auto_params = _derive_auto_params(project, governance, task_id, token_measurement)
         output = _run_collector(
             [sys.executable, str(collector), "--project", project.name, "--task", task_id,
              "--test-total", str(context.get("total", 0)), "--test-passed", str(context.get("passed", 0)),
              *_token_collector_args(token_measurement),
+             *auto_params,
              "--skip-matrix-tests", "--skip-matrix-check", "--test-runner", str(context.get("runner") or "unknown"),
              "--verification-context", str(context_path),
              "--output", str(governance / "telemetry.json")],

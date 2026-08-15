@@ -64,18 +64,30 @@ def _local_node_bins(home: Path) -> list[Path]:
     return bins
 
 
-def find_npm() -> str | None:
-    configured = os.environ.get("AGENTIC_AGILE_NPM")
+def find_node_tool(name: str) -> str | None:
+    """Find a Node runtime tool without depending on any single AI client."""
+    normalized = str(name or "").strip().lower()
+    if normalized not in {"node", "npm", "npx"}:
+        raise ValueError(f"unsupported Node tool: {name}")
+    suffix = ".exe" if normalized == "node" and os.name == "nt" else ".cmd" if os.name == "nt" else ""
+    configured = os.environ.get(f"AGENTIC_AGILE_{normalized.upper()}")
     if configured and Path(configured).is_file():
         return configured
-    on_path = shutil.which("npm") or shutil.which("npm.cmd")
+    candidates = (normalized + suffix, normalized) if suffix else (normalized,)
+    on_path = next((found for candidate in candidates if (found := shutil.which(candidate))), None)
     if on_path:
         return on_path
     for directory in _local_node_bins(Path.home()):
-        npm = _runtime_bin_is_usable(directory)
-        if npm:
-            return str(npm)
+        candidate = next((directory / candidate for candidate in candidates if (directory / candidate).is_file()), None)
+        if candidate is None:
+            continue
+        if normalized == "node" or _runtime_bin_is_usable(directory):
+            return str(candidate)
     return None
+
+
+def find_npm() -> str | None:
+    return find_node_tool("npm")
 
 
 def prepare_ocusage(tools_root: Path | str = DEFAULT_TOOLS_ROOT) -> dict:

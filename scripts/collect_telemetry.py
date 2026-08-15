@@ -361,10 +361,7 @@ def _accumulate_runs_raw(project_dir: Path, run_summaries: list, latest_contract
             raw["token_usage"] += int(token.get("value", 0) or 0)
             token_sources.add(str(token.get("source", "measured")))
         elif token.get("status") == "CUMULATIVE_SNAPSHOT":
-            # CUMULATIVE_SNAPSHOT 是项目级总量快照，取最大值（最新快照覆盖旧值）
-            val = int(token.get("value", 0) or 0)
-            if val > raw["token_usage"]:
-                raw["token_usage"] = val
+            # 项目日累计快照不能归属到具体任务，不进入任务聚合。
             token_sources.add("cumulative_snapshot_only")
         elif token.get("value"):
             # fallback：旧 run 有 token_usage 但无 token_measurement（status=UNKNOWN）
@@ -772,7 +769,7 @@ def _calc_compound_roi(args) -> dict:
     每任务人力节省 = hours_saved_per_task × human_hourly_rate
     月任务数 = 从历史 runs 自动推导（runs总数 / 跨度天数 × 30），默认 10
     """
-    project_dir = Path(getattr(args, "_project_dir", "."))
+    project_dir = Path(getattr(args, "_project_dir", None) or ".")
     cost_model = _load_cost_model(project_dir)
     human_rate = cost_model.get("human_hourly_rate", 200)       # 默认 ¥200/小时（中级开发者）
     hours_saved = cost_model.get("hours_saved_per_task", 0.5)   # 默认 0.5 小时/任务（30分钟）

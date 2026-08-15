@@ -22,7 +22,7 @@ from pathlib import Path
 from datetime import datetime
 
 from command_runner import run_command
-from runtime_context import parse_test_output, resolve_test_plan
+from runtime_context import find_node_tool, parse_test_output, resolve_test_plan
 
 
 # SCOPE-V 的五道机械门检查控制状态转换，而不是增加线性流程阶段。
@@ -228,8 +228,9 @@ def gate_coding(task_id, project_dir):
     if test_files:
         pkg = project_dir / "package.json"
         if pkg.exists():
+            npx = find_node_tool("npx") or "npx"
             rc, out, err = run(
-                ["npx", "vitest", "run", "--reporter=json"],
+                [npx, "vitest", "run", "--reporter=json"],
                 cwd=str(project_dir),
                 timeout=60,
             )
@@ -314,7 +315,8 @@ def gate_prove(task_id, project_dir):
 
     # 4. tsc / build 通过
     if pkg.exists():
-        rc, out, err = run(["npx", "tsc", "--noEmit"], cwd=str(project_dir), timeout=60)
+        npx = find_node_tool("npx") or "npx"
+        rc, out, err = run([npx, "tsc", "--noEmit"], cwd=str(project_dir), timeout=60)
         detail = (out or err).splitlines()[0][:80] if (out or err) else "有类型错误"
         all_pass &= check("TypeScript 编译通过", rc == 0,
                           detail)
@@ -369,14 +371,24 @@ def gate_closing(task_id, project_dir):
     print(f"━━━ 收尾门（{task_id}）━━━")
     gov = project_dir / "governance"
     all_pass = True
+    canonical_task = str(task_id).upper()
+
+    def task_file(directory, prefix, suffix):
+        expected = f"{prefix}{canonical_task}{suffix}".casefold()
+        if not directory.is_dir():
+            return directory / f"{prefix}{canonical_task}{suffix}"
+        return next(
+            (path for path in directory.iterdir() if path.is_file() and path.name.casefold() == expected),
+            directory / f"{prefix}{canonical_task}{suffix}",
+        )
 
     # 1. 证据包存在
-    evidence = gov / "evidence" / f"EB-{task_id}.md"
+    evidence = task_file(gov / "evidence", "EB-", ".md")
     all_pass &= check("证据包已生成", evidence.exists(),
                       f"找不到 {evidence}")
 
     # 2. 单任务遥测文件存在
-    tel_file = gov / "telemetry" / "runs" / f"telemetry-{task_id}.json"
+    tel_file = task_file(gov / "telemetry" / "runs", "telemetry-", ".json")
     all_pass &= check("单任务遥测文件存在", tel_file.exists(),
                       f"找不到 {tel_file}")
 
@@ -386,7 +398,7 @@ def gate_closing(task_id, project_dir):
         try:
             data = json.loads(proj_tel.read_text())
             runs = data.get("runs", [])
-            task_in_runs = any(r.get("task_id") == task_id for r in runs)
+            task_in_runs = any(str(r.get("task_id") or "").upper() == canonical_task for r in runs)
             all_pass &= check(f"telemetry.json runs 含 {task_id}（共 {len(runs)} 条）",
                               task_in_runs, "本任务不在 runs 数组中")
         except Exception:
@@ -408,7 +420,7 @@ def gate_closing(task_id, project_dir):
     graph = gov / "Intent_Graph.md"
     if graph.exists():
         content = graph.read_text()
-        has_task = task_id in content
+        has_task = canonical_task in content.upper()
         all_pass &= check(f"意图图谱含 {task_id}", has_task,
                           "图谱中未找到本任务 ID")
     else:

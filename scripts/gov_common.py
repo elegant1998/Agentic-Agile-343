@@ -50,33 +50,53 @@ def _reject_contract_conflicts(paths: list[Path]) -> None:
 
 def find_contracts(project_dir: Path) -> list[Path]:
     """发现所有契约文件（YAML + Markdown 双格式，去重排序）"""
-    patterns = ["Intent_Contract_*.yaml", "Intent_Contract_*.yml", "Intent_Contract_*.md"]
+    patterns = ["*.yaml", "*.yml", "*.md"]
     found: list[Path] = []
     contracts_dir = project_dir / "governance" / "contracts"
     search_root = contracts_dir if contracts_dir.exists() else project_dir / "governance" / "contracts"
     for p in patterns:
         found.extend(search_root.glob(p))
-    result = sorted(set(found))
+    result = sorted({path for path in found if _is_task_id(extract_task_id(path))})
     _reject_contract_conflicts(result)
     return result
 
 
 def find_contract(project_dir: Path, task_id: str) -> Path | None:
     """按任务 ID 定位唯一契约；多格式并存时 fail closed。"""
-    contracts_dir = project_dir / "governance" / "contracts"
-    found = [
-        contracts_dir / f"Intent_Contract_{task_id}{ext}"
-        for ext in (".yaml", ".yml", ".md")
-        if (contracts_dir / f"Intent_Contract_{task_id}{ext}").exists()
-    ]
+    expected = _normalize_task_id(task_id)
+    found = [path for path in find_contracts(project_dir) if extract_task_id(path) == expected]
     _reject_contract_conflicts(found)
     return found[0] if found else None
 
 
 def extract_task_id(filepath: Path) -> str:
-    """从契约/证据包文件名提取任务 ID（T-001 / T-001a 等）"""
-    m = re.search(r"(?:Intent_Contract|EB)_(.+?)\.(?:yaml|yml|md)$", filepath.name)
-    return m.group(1) if m else filepath.stem
+    """从正文元数据或兼容文件名提取规范化任务 ID。"""
+    try:
+        text = filepath.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        text = ""
+    patterns = (
+        r"(?:\*\*)?(?:任务\s*ID|task[_\s-]*id)(?:\*\*)?\s*[：:|]\s*`?([A-Z0-9][A-Z0-9_-]*)",
+        r"^\s*#\s*(?:Evidence\s+Bundle\s*[：:—-]|Intent\s+Contract\s*[：:—-])\s*`?([A-Z0-9][A-Z0-9_-]*)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.I | re.M)
+        if match:
+            return _normalize_task_id(match.group(1))
+    stem = filepath.stem
+    for prefix in ("Intent_Contract_", "Evidence_Bundle_", "EB-"):
+        if stem.lower().startswith(prefix.lower()):
+            stem = stem[len(prefix):]
+            break
+    return _normalize_task_id(stem)
+
+
+def _normalize_task_id(value: str) -> str:
+    return str(value or "").strip().strip("`").upper()
+
+
+def _is_task_id(value: str) -> bool:
+    return bool(re.fullmatch(r"(?:[A-Z0-9]+-)*T-[A-Z0-9]+(?:-[A-Z0-9]+)*", value))
 
 
 # ─── 契约解析 ──────────────────────────────────────────────
@@ -294,12 +314,17 @@ def find_evidence_bundles(project_dir: Path) -> list[Path]:
 
 def find_evidence_bundle(project_dir: Path, task_id: str) -> Path | None:
     """按任务 ID 定位证据包"""
-    ev_dir = project_dir / "governance" / "evidence"
-    for name in (f"EB-{task_id}.md", f"Evidence_Bundle_{task_id}.md"):
-        c = ev_dir / name
-        if c.exists():
-            return c
-    return None
+    expected = _normalize_task_id(task_id)
+    bundles = find_evidence_bundles(project_dir)
+    expected_names = {
+        f"EB-{expected}.md".casefold(),
+        f"Evidence_Bundle_{expected}.md".casefold(),
+    }
+    filename_matches = [path for path in bundles if path.name.casefold() in expected_names]
+    if len(filename_matches) == 1:
+        return filename_matches[0]
+    matches = [path for path in bundles if extract_task_id(path) == expected]
+    return matches[0] if len(matches) == 1 else None
 
 
 def is_task_completed(project_dir: Path, task_id: str) -> bool:
