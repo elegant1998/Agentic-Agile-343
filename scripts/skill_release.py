@@ -7,6 +7,7 @@ import argparse
 import os
 import re
 import shutil
+import subprocess
 import tempfile
 import zipfile
 from pathlib import Path
@@ -18,7 +19,8 @@ VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
 VERSION_FILES = ("SKILL.md", "README.md", "README.en.md", "RELEASE_NOTES.md", "RELEASE_NOTES.en.md")
 DEFAULT_EXCLUDES = {
     ".git", ".github", ".DS_Store", "__pycache__", "governance", "tests",
-    "dist", ".pytest_cache", ".mypy_cache",
+    "dist", ".pytest_cache", ".mypy_cache", ".coverage", ".workbuddy",
+    ".codebase-memory",
 }
 
 
@@ -97,6 +99,27 @@ def _ignored(_directory: str, names: list[str], excludes: set[str]) -> set[str]:
     return {name for name in names if name in excludes or name.endswith((".pyc", ".zip"))}
 
 
+def _tracked_files(source: Path) -> list[Path] | None:
+    """Use the repository manifest when source is a Git worktree root."""
+    root = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"], cwd=source,
+        capture_output=True, text=True, shell=False,
+    )
+    if root.returncode != 0 or Path(root.stdout.strip()).resolve() != source:
+        return None
+    listed = subprocess.run(
+        ["git", "ls-files", "-z"], cwd=source,
+        capture_output=True, shell=False,
+    )
+    if listed.returncode != 0:
+        return None
+    return [Path(raw.decode("utf-8")) for raw in listed.stdout.split(b"\0") if raw]
+
+
+def _excluded_path(path: Path, excludes: set[str]) -> bool:
+    return any(part in excludes for part in path.parts) or path.name.endswith((".pyc", ".zip"))
+
+
 def build_staging(source: Path | str, staging: Path | str,
                   excludes: set[str] | None = None) -> Path:
     source, staging = Path(source).resolve(), Path(staging).resolve()
@@ -106,7 +129,17 @@ def build_staging(source: Path | str, staging: Path | str,
     shutil.rmtree(temporary)
     backup = staging.parent / f".{staging.name}.backup"
     try:
-        shutil.copytree(source, temporary, ignore=lambda directory, names: _ignored(directory, names, excludes))
+        tracked = _tracked_files(source)
+        if tracked is None:
+            shutil.copytree(source, temporary, ignore=lambda directory, names: _ignored(directory, names, excludes))
+        else:
+            temporary.mkdir()
+            for relative in tracked:
+                if _excluded_path(relative, excludes):
+                    continue
+                target = temporary / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source / relative, target)
         if backup.exists():
             shutil.rmtree(backup)
         if staging.exists():
