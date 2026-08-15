@@ -18,7 +18,7 @@ def _unknown(identity: dict, provider_id: str, detail: str, task_id: str | None)
     return {
         "provider_id": provider_id, "counter_id": None,
         "project_uid": identity.get("project_uid"), "project_root": identity.get("project_root"),
-        "task_id": task_id, "host_tool": "other", "token_client": None,
+        "task_id": task_id, "principal_id": None, "host_tool": "other", "token_client": None,
         "input": None, "output": None, "value": None, "measured_at": None,
         "status": "UNKNOWN", "scope": "task_snapshot", "source": "unavailable",
         "evidence": [], "detail": detail, "provider_metadata": {},

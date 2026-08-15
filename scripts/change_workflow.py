@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """State-aware orchestration for safe solo changes in existing repositories."""
 from __future__ import annotations
-import argparse,json,subprocess,sys
+import argparse,hashlib,json,subprocess,sys
+from datetime import datetime, timezone
 from pathlib import Path
 from task_recon import scan_task
 from gate_check import check_signed
@@ -41,6 +42,46 @@ def _baseline_captured(project,task):
     if not path.exists():return False
     try:return load_envelope(path).get("status")=="CAPTURED"
     except Exception:return False
+def _preparation_path(project,task):
+    return Path(project)/"governance/telemetry/preparations"/f"{task}.json"
+def _sha256(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+def _preparation_artifacts(project,task):
+    return {
+        "token_baseline": Path(project)/"governance/telemetry/token-baselines"/f"{task}.json",
+        "context_measurement": Path(project)/"governance/telemetry/context-measurements"/f"{task}.json",
+    }
+def _write_preparation(project,task):
+    artifacts=_preparation_artifacts(project,task)
+    missing=[name for name,path in artifacts.items() if not path.is_file()]
+    if missing:raise RuntimeError("missing preparation artifacts: "+", ".join(missing))
+    payload={
+        "schema":"change-preparation/v1","task_id":task,
+        "prepared_at":datetime.now(timezone.utc).isoformat(),
+        "artifacts":{
+            name:{"path":str(path.relative_to(project)),"sha256":_sha256(path)}
+            for name,path in artifacts.items()
+        },
+    }
+    path=_preparation_path(project,task);path.parent.mkdir(parents=True,exist_ok=True)
+    tmp=path.with_suffix(path.suffix+".tmp")
+    tmp.write_text(json.dumps(payload,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
+    tmp.replace(path)
+    return payload
+def _validate_preparation(project,task):
+    path=_preparation_path(project,task)
+    if not path.is_file():return False,"PREPARE_MISSING: change prepare has not completed"
+    try:payload=json.loads(path.read_text(encoding="utf-8"))
+    except (OSError,json.JSONDecodeError):return False,"PREPARE_INVALID: receipt is unreadable"
+    if payload.get("schema")!="change-preparation/v1" or payload.get("task_id")!=task:
+        return False,"PREPARE_INVALID: receipt schema or task binding does not match"
+    expected=_preparation_artifacts(project,task);recorded=payload.get("artifacts") or {}
+    for name,artifact_path in expected.items():
+        item=recorded.get(name) or {}
+        try:valid=artifact_path.is_file() and item.get("path")==str(artifact_path.relative_to(project)) and item.get("sha256")==_sha256(artifact_path)
+        except OSError:valid=False
+        if not valid:return False,f"PREPARE_INVALID: {name} is missing, replaced, or belongs to another preparation"
+    return True,""
 def _result(state,next_action,command,**extra):
     return {"state":state,"next_action":next_action,"recommended_command":command,**extra}
 def workflow_status(project_dir,task_id):
@@ -69,6 +110,10 @@ def run_stage(project_dir,task_id,stage,host_tool=None):
     if stage=="prepare":
         status=workflow_status(project,task_id)
         if status["state"]!="READY_FOR_ORCHESTRATE":return status
+    if stage=="verify":
+        prepared,detail=_validate_preparation(project,task_id)
+        if not prepared:
+            return _result("BLOCKED","change prepare",f"python scripts/cli.py change prepare --task {task_id} --project-dir .",evidence=detail,failed_gate="prepare")
     gate={"prepare":"pre","verify":"prove","close":"closing"}[stage];result=_run_gate(project,task_id,gate)
     if not result["passed"]:
         if stage == "verify":
@@ -80,9 +125,12 @@ def run_stage(project_dir,task_id,stage,host_tool=None):
         return _result("BLOCKED",f"change {stage}",f"python scripts/cli.py change {stage} --task {task_id} --project-dir .",evidence=result["output"],failed_gate=gate)
     telemetry=None
     if stage == "prepare":
-        capture_token_baseline(project, task_id, host_tool=host_tool)
-        if (project / "governance" / "contracts").is_dir():
+        try:
+            capture_token_baseline(project, task_id, host_tool=host_tool)
             capture_context_measurement(project, task_id)
+            preparation=_write_preparation(project,task_id)
+        except Exception as exc:
+            return _result("BLOCKED","change prepare",f"python scripts/cli.py change prepare --task {task_id} --project-dir .",evidence=f"PREPARE_CAPTURE_FAILED: {exc}",failed_gate="prepare")
     if stage=="verify":
         try:
             telemetry=finalize_evidence(project,task_id,host_tool=host_tool)
@@ -103,6 +151,7 @@ def run_stage(project_dir,task_id,stage,host_tool=None):
     next_step={"prepare":"begin TDD Orchestrate","verify":"none","close":"none"}[stage]
     command={"prepare":"follow signed contract and TDD","verify":"","close":""}[stage]
     extra={"telemetry":telemetry} if telemetry is not None else {}
+    if stage=="prepare":extra["preparation"]=preparation
     return _result(state,next_step,command,evidence=result["output"],**extra)
 def main():
     p=argparse.ArgumentParser();sub=p.add_subparsers(dest="cmd",required=True)

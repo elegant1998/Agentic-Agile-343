@@ -559,13 +559,15 @@ function render(data, mode) {
         <tr><td>失败折现率</td><td style="text-align:right;color:var(--amber)">${((bd.failure_rate || 0) * 100).toFixed(1)}%</td></tr>
         <tr><td>月度节省（折现后）</td><td style="text-align:right;color:var(--green)">¥${(bd.monthly_saving || 0).toLocaleString()}</td></tr>
         <tr><td>AI 工具月成本</td><td style="text-align:right">¥${(bd.ai_monthly_cost || 0).toLocaleString()}</td></tr>
+        <tr><td>成本归属</td><td style="text-align:right">${bd.principal_id || 'UNATTRIBUTED'}</td></tr>
+        <tr><td>成本口径</td><td style="text-align:right">${bd.cost_status || 'UNKNOWN'}</td></tr>
         <tr style="font-weight:700"><td>月度复合 ROI</td><td style="text-align:right;color:${healthColor(cr.health)}">${cr.display}</td></tr>
       </table>
       <div style="font-size:0.65rem;color:var(--text-dim);margin-top:8px;">${cr.note || ''}</div>
     `;
   } else {
     document.getElementById('roi-breakdown').innerHTML =
-      '<div style="color:var(--text-dim);font-size:0.75rem;">需要在 constraints.yaml 配置 cost_model</div>';
+      '<div style="color:var(--text-dim);font-size:0.75rem;">可在 governance/measurement-contracts/AI_Cost_Model.yaml 按人员配置成本</div>';
   }
 
   // 准确率趋势（从 runs 历史数据渲染真实趋势）

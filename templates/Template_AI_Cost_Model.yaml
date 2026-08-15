@@ -1,0 +1,16 @@
+schema: ai-cost-model/v1
+currency: CNY
+
+# 未识别到 principal_id 时使用的单人成本估算，不代表实测或团队总成本。
+default_monthly_cost_per_person: 500
+
+# 可选。若 Usage Snapshot 未提供 principal_id，可显式指定默认归属人。
+default_principal_id: null
+
+# principal_id 应与跨工具 Usage Snapshot 中的同名字段一致。
+# people:
+#   alice:
+#     ai_monthly_cost: 500
+#     human_hourly_rate: 200
+#     hours_saved_per_task: 0.5
+people: {}

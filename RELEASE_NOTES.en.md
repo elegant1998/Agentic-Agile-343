@@ -2,14 +2,21 @@
 
 > 🌐 中文版: [RELEASE_NOTES.md](RELEASE_NOTES.md)
 
-# Agentic Agile 3-4-3 Governance Framework · Open Source Edition v1.51.2
+# Agentic Agile 3-4-3 Governance Framework · Open Source Edition v1.52.0
 
 > **Calibrate first, then fight the bosses.** A complete, runnable governance framework for Agentic AI development — fully open source, no reservations. Let AI R&D governance be both offensive and defensive.
 
-- **Version**: `1.51.2`
+- **Version**: `1.52.0`
 - **Release date**: 2026-08-15
 - **License**: Code/templates MIT · Whitepaper CC BY 4.0
 - **Author**: Wang Lijie (无敌哥), AI Governance Architect
+
+## v1.52.0: Unskippable preparation receipts and per-person cost models
+
+- A successful `change prepare` writes a `change-preparation/v1` receipt binding the Token baseline and Context Pack Measurement by path and SHA-256. `change verify` validates it before Prove and blocks missing, replaced, or cross-task artifacts, preventing Token collection without context-crop measurement.
+- AI monthly cost moves out of the Constraint Matrix into `governance/measurement-contracts/AI_Cost_Model.yaml`. The explicit fallback is CNY 500 per person per month instead of a hidden CNY 200; legacy `constraints.yaml.cost_model` remains read-only compatibility input.
+- Usage Snapshots may include `principal_id`. Compound ROI resolves monthly cost, labor rate, and saved hours per person, while dashboards expose attribution and statuses such as `PERSON_CONFIGURED`, `MODEL_DEFAULT`, and `FRAMEWORK_DEFAULT`.
+- Governance initialization now creates the AI Cost Model, and the Agent workflow explicitly requires successful `change prepare` after IO signing and before implementation.
 
 ## v1.51.2: Node CLI and legacy Python bootstrap compatibility
 

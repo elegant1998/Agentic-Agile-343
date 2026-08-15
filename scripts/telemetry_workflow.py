@@ -113,7 +113,7 @@ def _derive_auto_params(project: Path, governance: Path, task_id: str,
     """
     args = []
 
-    # _project_dir（供 _load_cost_model 读 constraints.yaml）
+    # _project_dir（供 _load_cost_model 读取独立 AI Cost Model）
     args += ["--_project-dir", str(project)]
 
     # Token usage only. Context Pack has an independent measurement contract.

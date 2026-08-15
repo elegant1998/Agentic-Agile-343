@@ -137,16 +137,27 @@ constraints:
 """
 
 
+def _ai_cost_model() -> str:
+    return """schema: ai-cost-model/v1
+currency: CNY
+default_monthly_cost_per_person: 500
+default_principal_id: null
+people: {}
+"""
+
+
 def _profile_files(profile: str, recon: dict | None, risk: dict) -> dict[str, str]:
     common_contract = {"governance/contracts/Intent_Contract_T-001.md": _pending_contract()}
     if profile == "explore":
         return {
             "governance/Intent.md": "# Lightweight Intent\n\n**状态**: DRAFT\n\n[目标、非目标、成功标准]\n",
             "governance/constraints.yaml": _constraints(profile),
+            "governance/measurement-contracts/AI_Cost_Model.yaml": _ai_cost_model(),
         }
     base = {
         "governance/Intent_Graph.md": _intent_graph(),
         "governance/constraints.yaml": _constraints(profile),
+        "governance/measurement-contracts/AI_Cost_Model.yaml": _ai_cost_model(),
         **common_contract,
     }
     if profile == "high-risk":

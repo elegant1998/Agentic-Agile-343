@@ -418,7 +418,7 @@ class _RawArgs:
         self.token_usage = raw["token_usage"]
         self.new_patterns = raw["new_patterns"]
         self.total_patterns = raw["total_patterns"]
-        # T-153: 从 constraints.yaml 读取 cost_model（而非硬编码 0）
+        # Cost inputs are resolved from the independent measurement contract.
         self._project_dir = raw.get("_project_dir", Path("."))
         # T-153: 上下文 tokens 从 token_usage 粗估（与 _derive_auto_params 同逻辑）
         self.context_input_tokens = raw.get("context_input_tokens", 0)
@@ -750,8 +750,28 @@ def _collect_value_layer(args) -> dict:
     }
 
 
+DEFAULT_AI_MONTHLY_COST_PER_PERSON = 500
+
+
 def _load_cost_model(project_dir: Path) -> dict:
-    """从 constraints.yaml 读取 cost_model 配置节。缺失时返回空 dict。"""
+    """Load the independent cost model, with legacy constraints compatibility."""
+    canonical = [
+        project_dir / "governance" / "measurement-contracts" / "AI_Cost_Model.yaml",
+        project_dir / "AI_Cost_Model.yaml",
+    ]
+    try:
+        import yaml
+    except ImportError:
+        return {}
+    for cand in canonical:
+        if cand.exists():
+            try:
+                data = yaml.safe_load(cand.read_text(encoding="utf-8")) or {}
+                if isinstance(data, dict) and data.get("schema") == "ai-cost-model/v1":
+                    return {**data, "_source": str(cand.relative_to(project_dir)), "_source_type": "measurement_contract"}
+            except Exception:
+                pass
+    # Compatibility only: new projects must use AI_Cost_Model.yaml.
     cands = [
         project_dir / "governance" / "constraints.yaml",
         project_dir / "constraints.yaml",
@@ -759,11 +779,10 @@ def _load_cost_model(project_dir: Path) -> dict:
     for cand in cands:
         if cand.exists():
             try:
-                import yaml
                 data = yaml.safe_load(cand.read_text(encoding="utf-8")) or {}
                 cm = data.get("cost_model")
                 if cm and isinstance(cm, dict):
-                    return cm
+                    return {**cm, "_source": str(cand.relative_to(project_dir)), "_source_type": "legacy_constraints"}
             except Exception:
                 pass
     return {}
@@ -779,12 +798,33 @@ def _calc_compound_roi(args) -> dict:
     """
     project_dir = Path(getattr(args, "_project_dir", None) or ".")
     cost_model = _load_cost_model(project_dir)
-    human_rate = cost_model.get("human_hourly_rate", 200)       # 默认 ¥200/小时（中级开发者）
-    hours_saved = cost_model.get("hours_saved_per_task", 0.5)   # 默认 0.5 小时/任务（30分钟）
-    ai_monthly = cost_model.get("ai_monthly_cost", 200)         # 默认 ¥200/月（WorkBuddy/Cursor 等）
+    token_measurement = getattr(args, "_token_measurement", {}) or {}
+    principal_id = (getattr(args, "principal_id", None) or
+                    token_measurement.get("principal_id") or
+                    cost_model.get("default_principal_id"))
+    people = cost_model.get("people") if isinstance(cost_model.get("people"), dict) else {}
+    person = people.get(principal_id, {}) if principal_id else {}
+    person = person if isinstance(person, dict) else {}
+    human_rate = (getattr(args, "human_hourly_rate", 0) or
+                  person.get("human_hourly_rate") or cost_model.get("human_hourly_rate") or 200)
+    hours_saved = (getattr(args, "hours_saved_per_task", 0) or
+                   person.get("hours_saved_per_task") or cost_model.get("hours_saved_per_task") or 0.5)
+    cli_ai_cost = getattr(args, "ai_monthly_cost", 0)
+    ai_monthly = (cli_ai_cost or person.get("ai_monthly_cost") or
+                  cost_model.get("default_monthly_cost_per_person") or
+                  cost_model.get("ai_monthly_cost") or DEFAULT_AI_MONTHLY_COST_PER_PERSON)
+    if cli_ai_cost:
+        cost_status = "CLI_OVERRIDE"
+    elif person.get("ai_monthly_cost"):
+        cost_status = "PERSON_CONFIGURED"
+    elif cost_model:
+        cost_status = "MODEL_DEFAULT"
+    else:
+        cost_status = "FRAMEWORK_DEFAULT"
+    resolved_principal = principal_id or "UNATTRIBUTED"
 
     if not human_rate or not hours_saved:
-        return {"status": "INSUFFICIENT_DATA", "detail": "缺少成本参数，请在 governance/constraints.yaml 配置 cost_model（human_hourly_rate / hours_saved_per_task / ai_monthly_cost）"}
+        return {"status": "INSUFFICIENT_DATA", "detail": "缺少成本参数，请在 governance/measurement-contracts/AI_Cost_Model.yaml 配置人员成本模型"}
 
     tasks_completed = max(args.tasks_completed or 0, 0)
     tasks_assigned = max(args.tasks_assigned or 0, 1)
@@ -818,6 +858,10 @@ def _calc_compound_roi(args) -> dict:
             "failure_rate": round(failure_rate, 4),
             "monthly_saving": round(monthly_saving, 2),
             "ai_monthly_cost": ai_cost,
+            "principal_id": resolved_principal,
+            "cost_status": cost_status,
+            "cost_model_source": cost_model.get("_source", "framework-default"),
+            "currency": cost_model.get("currency", "CNY"),
         },
         "formula": "((每任务节省 × 月任务数 × (1-失败率)) - 月AI成本) / 月AI成本 × 100%",
         "health": "EXCELLENT" if roi_pct >= 400 else "POSITIVE" if roi_pct >= 100 else "MARGINAL" if roi_pct >= 0 else "NEGATIVE",
@@ -1475,6 +1519,8 @@ def main():
                         help="【P1】每任务平均节省工时")
     parser.add_argument("--ai-monthly-cost", type=float, default=0.0,
                         help="【P1】AI 工具月成本（元）")
+    parser.add_argument("--principal-id", default=None,
+                        help="【P1】成本归属人 ID；缺省从 Usage Snapshot principal_id 获取")
 
     # ── 效率层参数 ──
     parser.add_argument("--context-input-tokens", type=int, default=0,

@@ -3,7 +3,7 @@ name: agentic-agile-343
 description: "Agentic-Agile-343，让 AI 研发治理进可攻退可守。用户说既有项目先看看、风险评估或初始化治理、门禁误报、分析文件影响范围、本次只允许修改某些文件、没有测试先固定现有行为、修改已有功能、报告 Bug/缺陷/回归并要求修复、设计多层验证、生成证据包并完成任务，或准备发布、生成发布清单、检查制品和证据是否一致、记录已发布/回滚时使用。提供 3-4-3、Recon、安全变更、Verification Plan、Evidence 遥测收口、Release Manifest、TDD、证据与遥测闭环。Use for existing-project governance, safe changes, bug/regression repair, risk-driven verification, evidence-to-telemetry finalization, proof-carrying release readiness, artifact/evidence binding, and release/rollback fact recording."
 metadata:
   display_name: "Agentic Agile 343"
-  version: "1.51.2"
+  version: "1.52.0"
   author: "王立杰-无敌哥"
   created: "2025-07-20"
 ---
@@ -63,6 +63,7 @@ metadata:
 | **门禁验证器** | `scripts/gate_check.py` | **SCOPE-V 5 个检查门的机械验证器：前置/编码/验证/收尾/Bug回溯（v1.20）** |
 | **跨工具 Usage Provider** | `scripts/usage_providers.py` + `scripts/token_usage.py` | **工具无关快照协议、结构化宿主输入、可信任务增量与 ocusage 兼容适配（v1.51.0）** |
 | **Context Pack 度量** | `scripts/context_measurement.py` + `scripts/crop_context.py` | **在裁剪边界实测候选/注入字节、必要来源保留、Trace 覆盖与预算利用（v1.51.0）** |
+| **AI 人员成本模型** | `templates/Template_AI_Cost_Model.yaml` | **独立度量口径；按 Usage Snapshot 的 `principal_id` 关联个人，缺省每人每月 ¥500，不混入业务约束矩阵** |
 | **依赖自举** | `scripts/_bootstrap.py` + `scripts/ensure_py_env.sh` | **Python 原生自包含依赖 bootstrap：首次缺失时自动建 venv + 装 pyyaml；后续探测健康即直接复用，不再执行 pip（v1.44.1）** |
 | **Skill 发布** | `scripts/skill_release.py` | **一条命令机械升版并校验；单次 staging 同时驱动本地原子安装与对外 ZIP（v1.44.2）** |
 | 代码上下文发现 | `scripts/discover_context.py` | AST 解析自动发现 API 端点、模型、依赖 |
@@ -136,7 +137,7 @@ metadata:
 
 > **跨工具可信遥测与不可旁路收口（v1.45.0）**：宿主 AI 工具、Token 客户端与项目身份分别记录，不依赖 WorkBuddy 或任何单一 AI 工具。项目日累计 Token 只可作为任务起止基线；仅同客户端、同项目、同自然日差值进入任务聚合，缺测或歧义保持 `UNKNOWN/N/A`。`change prepare` 自动捕获基线；`change verify` 必须连续执行 Prove、Evidence、Telemetry、Intent Graph 反馈与 Closing Gate，成功直接返回 `CLOSED`。Harness `recover --task T-XXX` 自动追加失败、恢复、复验事件链。
 
-> **Usage Provider 与 Context Pack Measurement（v1.51.0）**：Token 核心协议不绑定 Codex、WorkBuddy、Claude、Cursor 或任一宿主；任何工具都可输出标准 JSON 快照，ocusage 仅作为兼容 Provider。宿主桥接器可把任务级快照写入 `governance/telemetry/usage-snapshots/<TASK>.json`，工作流会按规范任务键自动发现；`AGENTIC_AGILE_USAGE_SNAPSHOT` 保留为显式覆盖入口。任务增量必须保持 Provider、counter、project、task 四重绑定，已绑定任务的 `MEASURED/task_snapshot` 可作为直接实测。`change prepare` 同时建立 Usage 基线并运行 Context Pack 裁剪测量；上下文压缩比来自同一候选集/注入包，不再用整次任务 Token 固定折算。Dashboard 必须把压缩比与必要来源保留率、Trace 覆盖率、预算利用率共同解释。
+> **Usage Provider、Context Pack 与人员成本（v1.52.0）**：Token 核心协议不绑定 Codex、WorkBuddy、Claude、Cursor 或任一宿主；任何工具都可输出标准 JSON 快照，ocusage 仅作为兼容 Provider。宿主桥接器可把任务级快照写入 `governance/telemetry/usage-snapshots/<TASK>.json`，工作流会按规范任务键自动发现；`AGENTIC_AGILE_USAGE_SNAPSHOT` 保留为显式覆盖入口。任务增量必须保持 Provider、counter、project、task 四重绑定，快照可用可选 `principal_id` 关联个人成本。AI 月成本属于度量口径，主配置为 `governance/measurement-contracts/AI_Cost_Model.yaml`，按人配置，未归属时仅以每人每月 ¥500 的框架默认值估算并标记 `UNATTRIBUTED/FRAMEWORK_DEFAULT`；旧 `constraints.yaml.cost_model` 只兼容读取。`change prepare` 同时建立 Usage 基线并运行 Context Pack 裁剪测量，成功后写入绑定两者摘要的准备凭据；`change verify` 缺失或发现凭据失配必须在 Prove 前阻断。上下文压缩比来自同一候选集/注入包，不再用整次任务 Token 固定折算。Dashboard 必须把压缩比与必要来源保留率、Trace 覆盖率、预算利用率共同解释。
 
 > **正式验证事实链（v1.39.0）**：Evidence/Telemetry 收口后由工作流代码追加 `formal_verification` 事件，结果严格为 `VERIFIED`、`CONDITIONAL` 或 `BLOCKED`。首次 `CONDITIONAL` 后续转 `VERIFIED` 不计首次成功；无正式事件时 `first_pass_rate` 为 UNKNOWN。`must_total=0` 输出 `NOT_APPLICABLE/N/A`，不显示虚假的 100%。
 
@@ -168,7 +169,7 @@ metadata:
 > python scripts/cli.py change prepare|verify|close --task T-XXX --project-dir .
 > ```
 >
-> 入口只编排已有 Recon、契约、围栏、Preserve 与门禁；计划默认 dry-run，状态从当前证据重算，每个非终态只给一个下一步。`change verify` 不再只给建议命令：Prove gate 通过后必须由工作流代码直接执行 `evidence finalize`，生成单任务遥测、项目遥测与双 Dashboard；收口失败则 `change verify` 返回 BLOCKED。详见 **[references/task_recon.md](references/task_recon.md#统一安全变更入口)**。
+> 入口只编排已有 Recon、契约、围栏、Preserve 与门禁；计划默认 dry-run，状态从当前证据重算，每个非终态只给一个下一步。IO 签署并要求开始后，Agent **必须先执行且确认 `change prepare` 成功，再进行实现**；不得把签署直接等同于已准备。准备凭据绑定 Token 基线与 Context Pack Measurement 的摘要，`change verify` 会在 Prove 前机械校验。Prove gate 通过后必须由工作流代码直接执行 `evidence finalize`，生成单任务遥测、项目遥测与双 Dashboard；收口失败则 `change verify` 返回 BLOCKED。详见 **[references/task_recon.md](references/task_recon.md#统一安全变更入口)**。
 
 > **Bug 修复专用入口（v1.30.3）**：用户直接说“这是一个 Bug：……请修复”即可。Agent 自动寻找唯一且有证据的父任务、分配 B-ID 并执行 `bug open/classify/reproduce/status/verify/telemetry/close`；父契约与原任务遥测保持历史不变。详见 **[references/natural_language_routing.md](references/natural_language_routing.md#bug-路由细则)**。
 

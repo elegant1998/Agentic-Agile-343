@@ -2,14 +2,21 @@
 
 > 🌐 English version: [RELEASE_NOTES.en.md](RELEASE_NOTES.en.md)
 
-# Agentic Agile 3-4-3 治理架构 · 开源版 v1.51.2
+# Agentic Agile 3-4-3 治理架构 · 开源版 v1.52.0
 
 > **先校准、再打怪。** 这是完整、可运行的 Agentic AI 研发治理框架——全部开源，无保留。让 AI 研发治理，进可攻退可守。
 
-- **版本**：`1.51.2`
+- **版本**：`1.52.0`
 - **发布日期**：2026-08-15
 - **许可证**：代码/模板 MIT · 白皮书 CC BY 4.0
 - **作者**：王立杰（无敌哥），AI 治理架构师
+
+## v1.52.0：不可旁路准备凭据与人员成本模型
+
+- `change prepare` 成功后写入 `change-preparation/v1` 凭据，绑定 Token 基线和 Context Pack Measurement 的路径与 SHA-256；`change verify` 在 Prove 前校验凭据，缺失、替换或跨任务复用均返回 `BLOCKED`，避免只采到 Token 却漏掉上下文裁剪。
+- AI 工具月成本从约束矩阵迁移到 `governance/measurement-contracts/AI_Cost_Model.yaml`。缺省是每人每月 ¥500 的明确估算，不再使用隐藏的 ¥200；旧 `constraints.yaml.cost_model` 仅保留兼容读取。
+- Usage Snapshot 可携带 `principal_id`，复合 ROI 按人员选择成本、时薪和每任务节省工时；Dashboard 同时披露成本归属与 `PERSON_CONFIGURED`、`MODEL_DEFAULT`、`FRAMEWORK_DEFAULT` 等口径状态。
+- 新项目初始化自动生成 AI Cost Model；Agent 工作流明确要求 IO 签署后先完成 `change prepare`，再开始实现。
 
 ## v1.51.2：Node CLI 与旧 Python 自举兼容修复
 
