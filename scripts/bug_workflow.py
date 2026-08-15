@@ -5,6 +5,7 @@ import argparse,json,re,subprocess,sys
 from datetime import date
 from pathlib import Path
 from gate_check import check_signed
+from gov_common import find_contract
 ROUTES={"implementation_regression":"BUG_FIX","specification_change":"AMENDMENT_OR_NEW_CONTRACT","gate_defect":"MAINTENANCE_M_XXX","environment":"ENVIRONMENT_REMEDIATION","cannot_reproduce":"INVESTIGATE","unknown":"ESCALATE_TO_IO"}
 META=re.compile(r"(?:\||>|<|\$\(|`|&&|\|\|)")
 def _path(project,bid):
@@ -20,9 +21,11 @@ def open_bug(project,bid,task):
  d={"version":"1.0","id":bid,"parent_task":task,"created":date.today().isoformat(),"status":"REPORTED","report":{"symptom":"PENDING","expected":"PENDING","actual":"PENDING"},"classification":"unknown","traceability":{"ac_or_preserve":""},"scope_unchanged":None,"permissions_unchanged":None,"approval_boundaries_unchanged":None,"reproduction":{"argv":[],"cwd":".","timeout_seconds":120},"route":"PENDING","red_evidence":None}
  return {"action":"created","path":str(_save(project,bid,d)),"status":"REPORTED"}
 def _parent_valid(project,task):
- project=Path(project);gov=project/"governance";files=sorted((gov/"contracts").glob(f"*{task}.*")) if (gov/"contracts").exists() else []
- if not files:return False
- text=files[0].read_text()
+ project=Path(project).resolve();gov=project/"governance"
+ try: contract=find_contract(project,task)
+ except Exception:return False
+ if contract is None:return False
+ text=contract.read_text()
  if not check_signed(text)[0]:return False
  legacy_status=bool(re.search(r"\|\s*状态\s*\|\s*(?:COMPLETED|ARCHIVED)\s*\|",text,re.I))
  immutable_closing=(gov/"evidence"/f"EB-{task}.md").exists() and (gov/"telemetry"/"runs"/f"telemetry-{task}.json").exists()

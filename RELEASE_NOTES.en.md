@@ -2,14 +2,21 @@
 
 > 🌐 中文版: [RELEASE_NOTES.md](RELEASE_NOTES.md)
 
-# Agentic Agile 3-4-3 Governance Framework · Open Source Edition v1.53.0
+# Agentic Agile 3-4-3 Governance Framework · Open Source Edition v1.53.1
 
 > **Calibrate first, then fight the bosses.** A complete, runnable governance framework for Agentic AI development — fully open source, no reservations. Let AI R&D governance be both offensive and defensive.
 
-- **Version**: `1.53.0`
-- **Release date**: 2026-08-15
+- **Version**: `1.53.1`
+- **Release date**: 2026-08-16
 - **License**: Code/templates MIT · Whitepaper CC BY 4.0
 - **Author**: Wang Lijie (无敌哥), AI Governance Architect
+
+## v1.53.1: Case-insensitive contract filename discovery
+
+- `change status/prepare` now reuses `gov_common.find_contract()` instead of a case-sensitive glob, so canonical uppercase task keys resolve legacy lowercase or mixed-case contract filenames.
+- Bug Workflow parent-contract validation uses the same shared resolver, preventing one contract from being visible to safe-change orchestration but missing from bug routing.
+- Only filename matching is relaxed. Task binding and signatures remain mandatory, while duplicate contract formats still fail closed.
+- Adds two real RED regressions; the complete suite passes `331/331`.
 
 ## v1.53.0: Canonical cross-stage task keys and current Codex thread metering
 

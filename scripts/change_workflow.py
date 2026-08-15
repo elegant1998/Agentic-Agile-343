@@ -11,6 +11,7 @@ from evidence_workflow import finalize_evidence
 from telemetry_tracker import append_formal_verification
 from telemetry_workflow import capture_context_measurement, capture_token_baseline
 from context_measurement import canonical_task_id
+from gov_common import find_contract
 
 def _plan_path(project,task): return Path(project).resolve()/"governance/change"/f"Change_Plan_{task}.yaml"
 def build_plan(project_dir,task_id,targets):
@@ -27,10 +28,9 @@ def _load_plan(project,task):
     try:return json.loads(path.read_text(encoding="utf-8"))
     except Exception:return None
 def _contract(project,task):
-    gov=Path(project)/"governance/contracts"
-    matches=sorted(gov.glob(f"*{task}.*")) if gov.exists() else []
-    if not matches:return False
-    try:return check_signed(matches[0].read_text(encoding="utf-8"))[0]
+    try:
+        contract=find_contract(Path(project).resolve(),task)
+        return bool(contract and check_signed(contract.read_text(encoding="utf-8"))[0])
     except Exception:return False
 def _envelope_authorized(project,task):
     path=Path(project)/"governance/Change_Envelope.yaml"
