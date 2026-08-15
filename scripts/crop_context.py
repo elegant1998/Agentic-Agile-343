@@ -313,6 +313,7 @@ def load_loop_memory(project_dir: Path, task_id: str) -> str | None:
 sys.path.insert(0, str(Path(__file__).parent))
 from gov_common import ContractConflictError, find_contract as _gc_find_contract, parse_contract as _gc_parse_contract
 from context_providers import build_context
+from context_measurement import build_context_measurement, measurement_path, write_context_measurement
 
 
 def _to_bullet_list(text) -> list:
@@ -423,8 +424,36 @@ def format_map_context(map_context: dict) -> str:
     return "\n".join(lines)
 
 
+def _candidate_context(project_dir: Path, task_id: str, code_ctx: dict,
+                       map_context: dict) -> tuple[str, list[str], list[str]]:
+    """Serialize the bounded source set considered by crop_context."""
+    parts, sources, required = [], [], []
+    contract = _gc_find_contract(project_dir, task_id)
+    files = [
+        ("contract", contract, True),
+        ("constraints", project_dir / "governance" / "constraints.yaml", True),
+        ("architecture", project_dir / "docs" / "architecture.md", False),
+        ("coding_guide", project_dir / "governance" / "AI_Coding_Guide.md", False),
+        ("loop_memory", project_dir / "governance" / ".loop_memory.yaml", False),
+    ]
+    for source_id, path, is_required in files:
+        if path and path.is_file():
+            try:
+                parts.append(f"## {source_id}\n{path.read_text(encoding='utf-8')}")
+                sources.append(source_id)
+                if is_required:
+                    required.append(source_id)
+            except OSError:
+                continue
+    parts.append("## code_context\n" + json.dumps(code_ctx, ensure_ascii=False, sort_keys=True))
+    parts.append("## map_context\n" + json.dumps(map_context, ensure_ascii=False, sort_keys=True))
+    sources.extend(["code_context", "map_context"])
+    return "\n".join(parts), sources, required
+
+
 def crop(project_dir: Path, task_id: str, target_domain: str = None, map_max_items: int = 10,
-         include_map_context: bool = True, map_context: dict | None = None) -> str:
+         include_map_context: bool = True, map_context: dict | None = None,
+         measurement_output: Path | None = None) -> str:
     """裁剪：组装 L2 + L3 + Ctx → 精简 prompt"""
     l2 = load_global_constraints(project_dir)
     l3 = load_yaml_contract(project_dir, task_id)
@@ -512,7 +541,27 @@ def crop(project_dir: Path, task_id: str, target_domain: str = None, map_max_ite
         if (project_dir / "src" / "main.py").exists():
             parts.append("- 在 src/main.py 注册新 router")
 
-    return '\n'.join(parts)
+    prompt = '\n'.join(parts)
+    if measurement_output is not None:
+        candidate, candidate_sources, required_sources = _candidate_context(
+            project_dir, task_id, ctx, map_context
+        )
+        injected_sources = [source for source in candidate_sources if source != "map_context"]
+        if not include_map_context:
+            injected_sources = [source for source in injected_sources if source != "map_context"]
+        else:
+            injected_sources.append("map_context")
+        traces = [str(link.get("id")) for link in map_context.get("trace_links", []) if link.get("id")]
+        budget = _load_token_budget(project_dir)["max_tokens"]
+        measurement = build_context_measurement(
+            task_id=task_id, project=project_dir,
+            candidate_text=candidate, injected_text=prompt,
+            candidate_sources=candidate_sources, injected_sources=injected_sources,
+            required_sources=required_sources, candidate_trace_ids=traces,
+            retained_trace_ids=traces if include_map_context else [], budget_tokens=budget,
+        )
+        write_context_measurement(measurement_output, measurement)
+    return prompt
 
 
 # ─── 隔离验证 ──────────────────────────────────────────────
@@ -708,6 +757,8 @@ def main():
                         help="Token 预算硬拦��：超预算时拒绝裁剪（退出码 1），强制 OA 拆分任务")
     parser.add_argument("--map-max-items", type=int, default=10, help="每类地图上下文最多注入的条目数")
     parser.add_argument("--no-map-context", action="store_true", help="关闭地图上下文注入，不删除地图")
+    parser.add_argument("--no-measurement", action="store_true",
+                        help="不写入 Context Pack measurement sidecar")
     args = parser.parse_args()
 
     project_dir = Path(args.project_dir).resolve()
@@ -719,8 +770,12 @@ def main():
 
     map_context = build_context(project_dir, max_items=args.map_max_items, include_recommendations=False)
     try:
+        context_output = None if args.no_measurement else measurement_path(
+            project_dir / "governance", args.task
+        )
         prompt = crop(project_dir, args.task, args.domain, args.map_max_items,
-                      not args.no_map_context, map_context=map_context)
+                      not args.no_map_context, map_context=map_context,
+                      measurement_output=context_output)
     except ContractConflictError as exc:
         print(f"错误: {exc}", file=sys.stderr)
         sys.exit(2)

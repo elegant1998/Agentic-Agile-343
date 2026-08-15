@@ -2,14 +2,21 @@
 
 > 🌐 English version: [RELEASE_NOTES.en.md](RELEASE_NOTES.en.md)
 
-# Agentic Agile 3-4-3 治理架构 · 开源版 v1.50.0
+# Agentic Agile 3-4-3 治理架构 · 开源版 v1.51.0
 
 > **先校准、再打怪。** 这是完整、可运行的 Agentic AI 研发治理框架——全部开源，无保留。让 AI 研发治理，进可攻退可守。
 
-- **版本**：`1.50.0`
+- **版本**：`1.51.0`
 - **发布日期**：2026-08-15
 - **许可证**：代码/模板 MIT · 白皮书 CC BY 4.0
 - **作者**：王立杰（无敌哥），AI 治理架构师
+
+## v1.51.0：跨工具 Usage Provider 与 Context Pack 真实度量
+
+- 新增工具无关 Usage Provider 协议。Codex、WorkBuddy、Claude、Cursor、OpenCode 等宿主可通过标准 JSON 快照接入；ocusage 降为兼容 Adapter，不再定义核心语义。
+- 任务 Token 增量要求 Provider、counter、project、task 四重绑定并保持单调；跨日、计数器重置、项目或任务冲突统一 fail closed 为 `UNKNOWN/N/A`。
+- `change prepare` 自动生成 Context Pack measurement sidecar；压缩比来自同一次裁剪的候选集与注入包，并同时披露必要来源保留率、Trace 覆盖率和预算利用率。
+- 删除 T-153 中“任务 Token × 固定 15%”伪造上下文压缩比的逻辑；旧显式上下文 CLI 参数仅保留为 `DECLARED` 兼容输入。
 
 ## v1.50.0：跨 AI 工具独立收口
 

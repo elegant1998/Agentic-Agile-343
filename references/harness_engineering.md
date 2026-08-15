@@ -165,6 +165,6 @@ export default defineConfig({
 
 ### 仍需手动录入的指标
 
-以下两项 harness 无法自动采集，需从平台面板手动录入:
-- **Token 消耗**: 从 AI 平台用量面板读取，通过 `--token-usage` 参数传入
-- **上下文压缩比**: 用 `crop_context.py` 估算，通过 `--context-input-tokens` / `--context-output-tokens` 传入
+以下指标由独立 Measurement Contract 采集，不由 harness 猜测：
+- **Token 消耗**：优先消费任意 AI 工具输出的标准 Usage Snapshot；ocusage 是兼容 Provider。只有同 Provider/counter/project/task 的起止差值进入任务指标。
+- **上下文压缩比**：`crop_context.py` 自动写入候选/注入 Context Pack sidecar，并同时记录必要来源保留率、Trace 覆盖率与预算利用率；不得从整次任务 Token 折算。

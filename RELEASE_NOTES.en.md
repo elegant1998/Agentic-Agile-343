@@ -2,14 +2,21 @@
 
 > 🌐 中文版: [RELEASE_NOTES.md](RELEASE_NOTES.md)
 
-# Agentic Agile 3-4-3 Governance Framework · Open Source Edition v1.50.0
+# Agentic Agile 3-4-3 Governance Framework · Open Source Edition v1.51.0
 
 > **Calibrate first, then fight the bosses.** A complete, runnable governance framework for Agentic AI development — fully open source, no reservations. Let AI R&D governance be both offensive and defensive.
 
-- **Version**: `1.50.0`
+- **Version**: `1.51.0`
 - **Release date**: 2026-08-15
 - **License**: Code/templates MIT · Whitepaper CC BY 4.0
 - **Author**: Wang Lijie (无敌哥), AI Governance Architect
+
+## v1.51.0: Cross-tool Usage Providers and real Context Pack measurement
+
+- Adds a host-neutral Usage Provider protocol. Codex, WorkBuddy, Claude, Cursor, OpenCode, and other hosts can emit the same structured JSON snapshot; ocusage is now a compatibility adapter rather than the core contract.
+- Task token deltas require stable provider, counter, project, and task bindings plus monotonic counters. Date rollover, resets, and attribution conflicts fail closed as `UNKNOWN/N/A`.
+- `change prepare` automatically writes a Context Pack measurement sidecar. Compression compares the candidate set and injected pack from the same crop and reports required-source retention, trace coverage, and budget utilization.
+- Removes the T-153 fixed 15% conversion from task tokens to context compression. Legacy explicit context CLI values remain available as `DECLARED` compatibility input.
 
 ## v1.50.0: AI-host-independent closure
 

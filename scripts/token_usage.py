@@ -11,6 +11,7 @@ from pathlib import Path
 
 from command_runner import run_command
 from tool_bootstrap import prepare_ocusage
+from usage_providers import StructuredFileUsageProvider, collect_usage_snapshot, usage_delta
 
 
 def project_identity(project: Path | str) -> dict:
@@ -24,11 +25,14 @@ def project_identity(project: Path | str) -> dict:
     repo_name = re.split(r"[/:]", repo)[-1].removesuffix(".git") if repo else ""
     aliases = list(dict.fromkeys([root.name, str(supplied), str(root), repo_name]))
     aliases = [alias for alias in aliases if alias]
-    return {"project_uid": hashlib.sha256(str(root).encode()).hexdigest()[:16],
+    identity_seed = repo or str(root)
+    return {"project_uid": hashlib.sha256(identity_seed.encode()).hexdigest()[:16],
             "project_root": str(root), "aliases": aliases}
 
 
 def task_delta_measurement(baseline: dict | None, current: dict | None) -> dict:
+    if (baseline or {}).get("provider_id") or (current or {}).get("provider_id"):
+        return usage_delta(baseline, current)
     current = current or {}
     common = (baseline and current and
               baseline.get("token_client") == current.get("token_client") and
@@ -127,16 +131,28 @@ _HOST_TOOL_TO_OCUSAGE_CLIENT = {
 
 def collect_token_measurement(project: Path | str, *, host_tool: str | None = None,
                               token_clients: list[str] | None = None, date_name: str = "today",
-                              baseline: dict | None = None) -> dict:
+                              baseline: dict | None = None, task_id: str | None = None,
+                              providers: list | None = None) -> dict:
     identity = project_identity(project)
     # 精确推断 host_tool：CLI 参数 > 环境变量 > 特征检测
     if not host_tool or host_tool == "other":
         host_tool = _infer_host_tool()
     configured_client = os.environ.get("AGENTIC_AGILE_TOKEN_CLIENT")
+    if providers is not None:
+        snapshot = collect_usage_snapshot(identity, task_id, providers)
+        return usage_delta(baseline, snapshot) if baseline else snapshot
+    structured_path = os.environ.get("AGENTIC_AGILE_USAGE_SNAPSHOT")
+    if structured_path:
+        snapshot = collect_usage_snapshot(
+            identity, task_id, [StructuredFileUsageProvider(structured_path)]
+        )
+        if snapshot.get("value") is not None:
+            return usage_delta(baseline, snapshot) if baseline else snapshot
     tool = prepare_ocusage()
     base = {"value": None, "status": "UNAVAILABLE", "source": "unavailable",
             "evidence": [], "measured_at": None, "scope": "task_delta",
-            "host_tool": host_tool, "token_client": None, **identity}
+            "host_tool": host_tool, "token_client": None, "provider_id": "ocusage",
+            "counter_id": None, "task_id": task_id, "provider_metadata": {}, **identity}
     if not tool.get("executable"):
         base["detail"] = tool.get("detail", "ocusage is unavailable")
         return base
@@ -176,6 +192,7 @@ def collect_token_measurement(project: Path | str, *, host_tool: str | None = No
                               "status": "CUMULATIVE_SNAPSHOT", "source": f"measured:ocusage:{client}",
                               "measured_at": datetime.now(timezone.utc).isoformat(),
                               "scope": "project_daily_snapshot", "token_client": client,
+                              "counter_id": f"{client}:{try_date}:{identity['project_uid']}",
                               "date": try_date, "input": int(metric.get("inputTokens", 0)),
                               "output": int(metric.get("outputTokens", 0))})
             break  # 有数据就停止回退

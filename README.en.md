@@ -1,4 +1,4 @@
-# Agentic Agile 3-4-3 Governance Framework · Open Source Edition v1.50.0
+# Agentic Agile 3-4-3 Governance Framework · Open Source Edition v1.51.0
 
 > 🌐 中文版: [README.md](README.md)
 
@@ -48,10 +48,10 @@ This repository **is** the complete edition — no more Community/Full split:
 | Single-project proof-carrying release / artifact-evidence binding / release facts | `scripts/release_manifest.py`, `Template_Release_Manifest.yaml` |
 | Evidence bundle audit | `scripts/audit_evidence.py` |
 | Triangulation / rollback safety / freshness / cross-module | `scripts/verify_*.py` |
-| Context engineering 3-layer injection | `scripts/crop_context.py` |
+| Context engineering + real Context Pack measurement + L0-L3 dual maps | `scripts/crop_context.py`, `scripts/context_measurement.py`, `scripts/context_providers.py` |
 | Work-graph DAG engine | `scripts/graph_engine.py` |
 | Tool audit | `scripts/audit_tools.py` |
-| Telemetry collection (4 layers, 9 dimensions) + token measurement | `scripts/collect_telemetry.py`, `scripts/token_usage.py`, `fetch_token_usage.sh` |
+| Telemetry collection (4 layers, 9 dimensions) + cross-tool Usage Providers | `scripts/collect_telemetry.py`, `scripts/usage_providers.py`, `scripts/token_usage.py` |
 | Cross-platform telemetry + dashboard | `scripts/telemetry_workflow.py`, `scripts/telemetry_tracker.py`, `assets/dashboard.html` |
 | Automatic evidence-to-telemetry finalization + dual dashboards | `scripts/evidence_workflow.py` |
 | Critical Thinking / Grill-Me / LOOP / Graph / maintenance / Recon / verification / release | `references/` — 15 references |

@@ -8,7 +8,7 @@ from gate_check import check_signed
 from change_envelope import _load as load_envelope
 from evidence_workflow import finalize_evidence
 from telemetry_tracker import append_formal_verification
-from telemetry_workflow import capture_token_baseline
+from telemetry_workflow import capture_context_measurement, capture_token_baseline
 
 def _plan_path(project,task): return Path(project).resolve()/"governance/change"/f"Change_Plan_{task}.yaml"
 def build_plan(project_dir,task_id,targets):
@@ -81,6 +81,8 @@ def run_stage(project_dir,task_id,stage,host_tool=None):
     telemetry=None
     if stage == "prepare":
         capture_token_baseline(project, task_id, host_tool=host_tool)
+        if (project / "governance" / "contracts").is_dir():
+            capture_context_measurement(project, task_id)
     if stage=="verify":
         try:
             telemetry=finalize_evidence(project,task_id,host_tool=host_tool)

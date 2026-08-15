@@ -1,4 +1,4 @@
-# Agentic Agile 3-4-3 治理架构 · 开源版 v1.50.0
+# Agentic Agile 3-4-3 治理架构 · 开源版 v1.51.0
 
 > **让AI交付可治理、可追溯、可验证。** 这是一套 Agentic AI 研发的**完整、可运行治理框架**——从意图契约到证据闭环、从约束门禁到遥测仪表板，全部开源，开箱即用。让 AI 研发治理，进可攻退可守。
 
@@ -44,10 +44,10 @@
 | 单项目携证发布 / 制品证据绑定 / 发布回滚事实 | `scripts/release_manifest.py`、`Template_Release_Manifest.yaml` |
 | 证据包审计 | `scripts/audit_evidence.py` |
 | 三方一致性 / 回滚安全 / 时效 / 跨模块 | `scripts/verify_*.py` |
-| 上下文工程三层注入 + L0-L3 双地图渐进增强 | `scripts/crop_context.py`、`scripts/context_providers.py` |
+| 上下文工程三层注入 + Context Pack 真实度量 + L0-L3 双地图 | `scripts/crop_context.py`、`scripts/context_measurement.py`、`scripts/context_providers.py` |
 | 工作图 DAG 引擎 | `scripts/graph_engine.py` |
 | 工具审计 | `scripts/audit_tools.py` |
-| 遥测采集（4 层 9 维） + Token 实测 | `scripts/collect_telemetry.py`、`scripts/token_usage.py`、`fetch_token_usage.sh` |
+| 遥测采集（4 层 9 维） + 跨工具 Usage Provider | `scripts/collect_telemetry.py`、`scripts/usage_providers.py`、`scripts/token_usage.py` |
 | 跨平台可信遥测 + 仪表板 | `scripts/telemetry_workflow.py`、`scripts/telemetry_tracker.py`、`assets/dashboard.html` |
 | Evidence 完成后自动遥测收口 + 双 Dashboard | `scripts/evidence_workflow.py` |
 | 批判性思维 / Grill-Me / LOOP / Graph / 门禁维护 / Recon / 验证 / 发布 | `references/` 15 篇参考 |

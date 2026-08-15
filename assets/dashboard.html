@@ -680,12 +680,23 @@ function render(data, mode) {
   const cc = eff.context_compression || {};
   const te = eff.token_efficiency || {};
   const ee = eff.execution_efficiency || {};
+  const ccCandidate = cc.candidate || {};
+  const ccInjected = cc.injected || {};
+  const ccRetention = cc.required_retention || {};
+  const ccTrace = cc.trace_coverage || {};
+  const ccBudget = cc.budget_utilization || {};
+  const metricPercent = (metric) => metric.value == null ? 'N/A' : `${(metric.value * 100).toFixed(1)}%`;
+  const ccVolume = ccCandidate.units != null
+    ? `${ccCandidate.units.toLocaleString()} → ${(ccInjected.units || 0).toLocaleString()} ${cc.counter || ccCandidate.unit || 'units'}`
+    : `${cc.input_tokens || 0} → ${cc.output_tokens || 0} tokens (declared)`;
 
   document.getElementById('efficiency-kpi').innerHTML = `
     <div class="card">
       <h3>📐 上下文压缩比</h3>
       <div class="value" style="color:${healthColor(cc.health)}">${cc.display || 'N/A'}</div>
-      <div class="sub">${cc.input_tokens || 0} → ${cc.output_tokens || 0} tokens</div>
+      <div class="sub">${ccVolume}</div>
+      <div class="sub">必要来源 ${metricPercent(ccRetention)} · Trace ${metricPercent(ccTrace)}</div>
+      <div class="sub">预算利用 ${metricPercent(ccBudget)} · ${cc.status || 'NOT_COLLECTED'}</div>
       <span class="tag ${healthTag(cc.health)}">${cc.health || 'N/A'}</span>
       <div class="sub" style="color:var(--text-dim);margin-top:4px;">${cc.note || ''}</div>
     </div>
@@ -836,7 +847,7 @@ function loadDemo() {
       must_pass_rate: { value: 1.0, display: '100.0%', must_passed: 20, must_total: 20 }
     },
     efficiency: {
-      context_compression: { ratio: 5.3, display: '5.3:1', input_tokens: 8000, output_tokens: 1500, health: 'EXCELLENT', note: '' },
+      context_compression: { status: 'MEASURED', ratio: 5.3, display: '5.3:1', counter: 'utf8_bytes', candidate: { units: 8000 }, injected: { units: 1500 }, required_retention: { value: 1.0 }, trace_coverage: { value: 0.8 }, budget_utilization: { value: 0.25 }, health: 'EXCELLENT', note: '' },
       token_efficiency: { tokens_per_task: 4500, total_tokens: 45000, total_tasks: 10, health: 'EFFICIENT' },
       execution_efficiency: { tasks_per_round: 1.5, tasks_completed: 9, execution_rounds: 6, health: 'NORMAL' }
     },

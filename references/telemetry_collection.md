@@ -47,7 +47,7 @@ python scripts/collect_telemetry.py \
     # ── ROI 参数（P1）──
     --human-hourly-rate 500 --hours-saved-per-task 2.0 \
     --ai-monthly-cost 50000 \
-    # ── 效率层（P1）──
+    # ── 效率层（P1，旧显式输入兼容）──
     --context-input-tokens 8000 --context-output-tokens 1500 \
     # ── 进化层（P1）──
     --new-patterns 3 --total-patterns 12 \
@@ -103,10 +103,12 @@ Layer 4 — 进化层（回答"系统在变好还是变差"）
 >
 > 优秀团队通常 3 年内实现 200%-400% 复合 ROI
 
-**上下文压缩比（P1）**：裁剪前后 Token 比。
-> 公式：输入 Token ÷ 输出 Token
+**上下文压缩比（P1）**：`crop_context.py` 在同一次裁剪边界记录候选 Context Pack 与最终注入包，主比率使用两侧相同的 UTF-8 byte counter。
+> 公式：候选 units ÷ 注入 units。Token 估算明确标记为 `ESTIMATED`，不冒充具体模型 tokenizer。
 >
-> ≥5:1：优秀（crop_context.py 效果显著）| 3-5:1：良好 | <3:1：需优化
+> 压缩比不能单独判优，必须同时查看必要来源保留率、Trace 覆盖率和预算利用率。高压缩但遗漏契约/约束时状态为 `INCOMPLETE`。
+>
+> `change prepare` 自动写入 `governance/telemetry/context-measurements/<TASK>.json`；旧 `--context-input-tokens/--context-output-tokens` 仅作 `DECLARED` 兼容输入。
 
 **知识沉淀率（P1）**：本周期新模式占累积模式的比例。
 > ≥15%：活跃学习 | 5-15%：稳步积累 | <5%：停滞

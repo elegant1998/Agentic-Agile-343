@@ -15,6 +15,7 @@ from pathlib import Path
 from project_snapshot import ProjectSnapshot
 from runtime_context import parse_test_output, resolve_test_plan, verification_context_checksum
 from token_usage import collect_token_measurement
+from context_measurement import load_context_measurement, measurement_path
 
 
 def _test_command(project):
@@ -53,7 +54,7 @@ def _token_baseline_path(governance, task_id):
 def capture_token_baseline(project_dir, task_id, host_tool=None, token_clients=None):
     project = Path(project_dir).resolve()
     measurement = collect_token_measurement(
-        project, host_tool=host_tool, token_clients=token_clients,
+        project, host_tool=host_tool, token_clients=token_clients, task_id=task_id,
     )
     path = _token_baseline_path(project / "governance", task_id)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -69,6 +70,7 @@ def collect_workflow_token_measurement(project, governance, task_id, host_tool=N
         baseline = None
     return collect_token_measurement(
         project, host_tool=host_tool, token_clients=token_clients, baseline=baseline,
+        task_id=task_id,
     )
 
 
@@ -76,12 +78,34 @@ def _token_collector_args(measurement):
     return ["--token-measurement-json", json.dumps(measurement, ensure_ascii=False)]
 
 
+def _context_collector_args(governance: Path, task_id: str) -> list[str]:
+    from token_usage import project_identity
+    expected_uid = project_identity(governance.parent)["project_uid"]
+    measurement = load_context_measurement(
+        measurement_path(governance, task_id), task_id, expected_uid
+    )
+    if measurement is None:
+        return []
+    return ["--context-measurement-json", json.dumps(measurement, ensure_ascii=False)]
+
+
+def capture_context_measurement(project_dir: Path | str, task_id: str) -> dict | None:
+    """Build the Context Pack and its sidecar at the normal change-prepare boundary."""
+    project = Path(project_dir).resolve()
+    from crop_context import crop
+
+    path = measurement_path(project / "governance", task_id)
+    crop(project, task_id, measurement_output=path)
+    from token_usage import project_identity
+    return load_context_measurement(path, task_id, project_identity(project)["project_uid"])
+
+
 def _derive_auto_params(project: Path, governance: Path, task_id: str,
                         token_measurement: dict) -> list[str]:
     """T-153: 自动推导 dashboard 所需参数并注入 collect_telemetry 命令行。
 
     推导来源：
-    - token_usage / context tokens: token_measurement
+    - token_usage: token_measurement
     - execution_rounds: telemetry.json run_count
     - hitl_count: governance/evidence/ 中 ESCALATED 约束数
     - new_patterns / total_patterns: Intent_Graph.md 节点数
@@ -92,17 +116,13 @@ def _derive_auto_params(project: Path, governance: Path, task_id: str,
     # _project_dir（供 _load_cost_model 读 constraints.yaml）
     args += ["--_project-dir", str(project)]
 
-    # token / context 从 token_measurement 推导
+    # Token usage only. Context Pack has an independent measurement contract.
     tm = token_measurement or {}
     tm_value = int(tm.get("value") or 0)
     tm_status = tm.get("status", "UNKNOWN")
     if tm_value > 0:
         args += ["--token-usage", str(tm_value)]
         args += ["--token-source", str(tm.get("source", "estimated"))]
-        # 上下文压缩比：token_usage ≈ context_input（粗估）
-        args += ["--context-input-tokens", str(tm_value)]
-        # output ≈ input × 0.15（粗估 ratio）
-        args += ["--context-output-tokens", str(max(1, int(tm_value * 0.15)))]
 
     # execution_rounds 从 telemetry.json run_count 推导
     tel_path = governance / "telemetry.json"
@@ -243,6 +263,7 @@ def run(task_id, governance_dir, timeout=300, refresh_only=False, prepare_only=F
             [sys.executable, str(collector), "--project", project.name, "--task", task_id,
              "--test-total", str(context.get("total", 0)), "--test-passed", str(context.get("passed", 0)),
              *_token_collector_args(token_measurement),
+             *_context_collector_args(governance, task_id),
              *auto_params,
              "--skip-matrix-tests", "--skip-matrix-check", "--test-runner", str(context.get("runner") or "unknown"),
              "--verification-context", str(context_path),
@@ -305,6 +326,7 @@ def run(task_id, governance_dir, timeout=300, refresh_only=False, prepare_only=F
         sys.executable, str(collector), "--project", project.name, "--task", task_id,
         "--test-total", str(tests["total"]), "--test-passed", str(tests["passed"]),
         *_token_collector_args(token_measurement),
+        *_context_collector_args(governance, task_id),
         *auto_params,
         "--skip-matrix-tests", "--test-runner", str(tests.get("runner") or "unknown"),
         "--verification-context", str(context_path),

@@ -279,6 +279,7 @@ def _raw_summary_from_telemetry(telemetry: dict) -> dict:
             "source": str((telemetry.get("cost") or {}).get("token_source", "estimated")),
             "scope": "legacy_input",
         },
+        "context_measurement": ((telemetry.get("efficiency") or {}).get("context_compression") or {}).get("measurement"),
         "new_patterns": int(knowledge.get("new_patterns_this_cycle", 0) or 0),
         "total_patterns": int(knowledge.get("total_patterns_accumulated", 0) or 0),
     }
@@ -416,6 +417,7 @@ class _RawArgs:
         # T-153: 上下文 tokens 从 token_usage 粗估（与 _derive_auto_params 同逻辑）
         self.context_input_tokens = raw.get("context_input_tokens", 0)
         self.context_output_tokens = raw.get("context_output_tokens", 0)
+        self._context_measurement = raw.get("context_measurement")
         # T-153: 月任务数（供 ROI 计算）
         self.estimated_monthly_tasks = raw.get("estimated_monthly_tasks")
         now = datetime.now(timezone.utc).isoformat()
@@ -459,7 +461,10 @@ def _aggregate_project_from_runs(
         "governance": {},
     }
     raw = _accumulate_runs_raw(project_dir, run_summaries, latest)
-    # T-153: 实时采集 token（与 _derive_auto_params 同逻辑）
+    raw["context_measurement"] = (
+        ((latest.get("efficiency") or {}).get("context_compression") or {}).get("measurement")
+    )
+    # Token usage and Context Pack are independent measurements.
     raw["_project_dir"] = str(project_dir)
     # T-153: 从历史 runs 推导月任务数（供 ROI 计算）
     raw["estimated_monthly_tasks"] = _estimate_monthly_tasks(run_summaries)
@@ -470,9 +475,6 @@ def _aggregate_project_from_runs(
         if tm_val > 0 and raw["token_usage"] == 0:
             raw["token_usage"] = tm_val
             raw["token_source"] = tm.get("source", "estimated")
-            # 上下文压缩比：token_usage ≈ context_input
-            raw["context_input_tokens"] = tm_val
-            raw["context_output_tokens"] = max(1, int(tm_val * 0.15))
     except Exception:
         pass
     fake = _RawArgs(raw)
@@ -905,11 +907,10 @@ def _calc_autonomy_score(auto_heal: float, hitl: float, must_pass: float) -> flo
 # ─── Layer 3: 效率层 — 回答"人机协作效率如何" ──────────────
 
 def _collect_efficiency_layer(args) -> dict:
-    # P1: 上下文压缩比
-    cc_ratio = _safe_ratio(args.context_input_tokens, max(args.context_output_tokens, 1))
-
-    # T-153: context tokens 均为 0 时标 NOT_COLLECTED（砍误导提示）
-    context_not_collected = (args.context_input_tokens == 0 and args.context_output_tokens == 0)
+    context_measurement = getattr(args, "_context_measurement", None)
+    context_not_collected = not context_measurement and (
+        args.context_input_tokens == 0 and args.context_output_tokens == 0
+    )
 
     # Token 效率：每任务平均 Token
     measurement = getattr(args, "_token_measurement", {})
@@ -928,7 +929,29 @@ def _collect_efficiency_layer(args) -> dict:
     # 执行效率：每轮次完成任务数
     tasks_per_round = _safe_ratio(args.tasks_completed or 0, max(args.execution_rounds, 1))
 
-    if context_not_collected:
+    if context_measurement:
+        ratio = context_measurement["compression_ratio"].get("value")
+        context_compression = {
+            "status": context_measurement.get("status", "MEASURED"),
+            "ratio": ratio,
+            "display": f"{ratio:.1f}:1" if ratio is not None else "N/A",
+            "counter": context_measurement.get("counter"),
+            "candidate": context_measurement.get("candidate"),
+            "injected": context_measurement.get("injected"),
+            "required_retention": context_measurement.get("required_retention"),
+            "trace_coverage": context_measurement.get("trace_coverage"),
+            "budget_utilization": context_measurement.get("budget_utilization"),
+            "source": context_measurement.get("source"),
+            "measured_at": context_measurement.get("measured_at"),
+            "measurement": context_measurement,
+            "health": (
+                "INCOMPLETE" if (context_measurement.get("required_retention") or {}).get("status") == "INCOMPLETE"
+                else "EXCELLENT" if ratio is not None and ratio >= 5.0
+                else "GOOD" if ratio is not None and ratio >= 3.0 else "ROOM_FOR_IMPROVEMENT"
+            ),
+            "note": "压缩率必须与必要上下文保留率和 Trace 覆盖率共同解释",
+        }
+    elif context_not_collected:
         context_compression = {
             "status": "NOT_COLLECTED",
             "display": "未采集",
@@ -939,12 +962,15 @@ def _collect_efficiency_layer(args) -> dict:
             "note": "传入 --context-input-tokens 和 --context-output-tokens 以启用",
         }
     else:
+        cc_ratio = _safe_ratio(args.context_input_tokens, max(args.context_output_tokens, 1))
         context_compression = {
+            "status": "DECLARED",
             "ratio": round(cc_ratio, 1),
             "display": f"{cc_ratio:.1f}:1",
             "input_tokens": args.context_input_tokens,
             "output_tokens": args.context_output_tokens,
             "health": "EXCELLENT" if cc_ratio >= 5.0 else "GOOD" if cc_ratio >= 3.0 else "ROOM_FOR_IMPROVEMENT",
+            "source": "legacy_cli_input",
             "note": (
                 "上下文压缩比 ≥ 5:1 表示裁剪效果优秀"
                 if cc_ratio >= 5.0 else "上下文压缩比偏低"
@@ -1450,6 +1476,8 @@ def main():
                         help="【P1】裁剪前上下文 Token 数")
     parser.add_argument("--context-output-tokens", type=int, default=0,
                         help="【P1】裁剪后上下文 Token 数")
+    parser.add_argument("--context-measurement-json", default=None,
+                        help="Context Pack measurement/v1 JSON")
 
     # ── 进化层参数 ──
     parser.add_argument("--new-patterns", type=int, default=0,
@@ -1473,6 +1501,19 @@ def main():
             parser.error(f"invalid --token-measurement-json: {exc}")
         if not isinstance(args.token_measurement, dict):
             parser.error("--token-measurement-json must be an object")
+    if args.context_measurement_json:
+        try:
+            from context_measurement import validate_context_measurement
+            from token_usage import project_identity
+            args._context_measurement = json.loads(args.context_measurement_json)
+        except json.JSONDecodeError as exc:
+            parser.error(f"invalid --context-measurement-json: {exc}")
+        output = Path(args.output).resolve()
+        expected_project = output.parent.parent if output.parent.name == "governance" else Path.cwd().resolve()
+        if not validate_context_measurement(
+            args._context_measurement, args.task, project_identity(expected_project)["project_uid"]
+        ):
+            parser.error("--context-measurement-json does not match schema/task")
     # v1.19: --module-id 作为 --task 的 fallback（兼容旧调用习惯）
     if not args.task and args.module_id:
         args.task = args.module_id
