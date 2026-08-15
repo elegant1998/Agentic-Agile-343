@@ -506,11 +506,11 @@ Agentic Agile 不是传统敏捷加 AI，也不是一套更重的治理流程。
 #### C. 配套资料
 
 - [Agentic Agile 白皮书 PDF 版本](http://agentic.iloveagile.me/)
-- [Agentic Agile 90 天首轮转型验证清单](http://www.iloveagile.me/)
-- [Agentic Agile 四维成熟度自测表](http://www.iloveagile.me/)
+- [Agentic Agile 90 天首轮转型验证清单](http://agentic.iloveagile.me/)
+- [Agentic Agile 四维成熟度自测表](http://agentic.iloveagile.me/)
 
-- [《Agentic Agile 智能体敏捷：从碳基协作到硅基自治》](http://www.iloveagile.me/shop/)：构建 AI 时代的人机协同研发操作系统
-- 《Agentic Agile（智能体敏捷）：AI 时代研发组织重构与转型沙盘》（联系无敌哥）
+- [《Agentic Agile 智能体敏捷：从碳基协作到硅基自治---构建 AI 时代的人机协同研发操作系统》](http://agentic.iloveagile.me/) 【图书】
+- 《Agentic Agile 智能体敏捷：从碳基协作到硅基自治---AI时代研发组织重构与转型沙盘》（联系无敌哥）
 
 #### D. 联系无敌哥
 
