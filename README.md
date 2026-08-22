@@ -4,7 +4,7 @@
 
 Agentic Agile 3-4-3 是一套面向 Agentic AI 研发的治理 Skill，帮助团队建立意图、约束、验证和证据闭环。
 
-![3-4-3-runtime-kernel](./pic/3-4-3-runtime-kernel.png)
+![3-4-3-runtime-kernel](./pic/3-4-3-runtime-kernel.jpg)
 
 - 官网：<http://agentic.iloveagile.me/>
 - 方法论白皮书：<https://github.com/elegant1998/Agentic-Agile-Whitepaper>

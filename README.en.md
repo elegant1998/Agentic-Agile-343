@@ -2,7 +2,7 @@
 
 > Governable, traceable, and verifiable delivery with AI.
 
-![3-4-3-runtime-kernel](./pic/3-4-3-runtime-kernel.png)
+![3-4-3-runtime-kernel](./pic/3-4-3-runtime-kernel.jpg)
 
 Agentic Agile 3-4-3 is a governance Skill for Agentic AI development. It helps teams build a closed loop of intent, constraints, verification, and evidence.
 
