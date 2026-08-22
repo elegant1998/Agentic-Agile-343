@@ -1,9 +1,0 @@
-# Agentic Agile 3-4-3 Skill — Python 依赖
-#
-# 安装: pip install -r requirements.txt
-# Python >= 3.10
-#
-# 所有脚本的标准库依赖（json, re, subprocess, pathlib, argparse 等）无需声明。
-# 以下为可选外部依赖——缺失时脚本降级运行（不崩溃）。
-
-pyyaml>=6.0    # YAML 解析（constraints.yaml, Intent_Contract.yaml）；缺失时降级为 MD-only 模式

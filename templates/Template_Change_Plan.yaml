@@ -1,8 +1,0 @@
-version: "1.0"
-task_id: T-XXX
-status: DRAFT
-recon: {}
-baseline_required: true
-baseline_not_required: {accepted: false, source: ""}
-unknown_decision: {status: PENDING, source: ""}
-history: []

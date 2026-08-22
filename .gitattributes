@@ -1,6 +1,0 @@
-governance/** export-ignore
-tests/** export-ignore
-__pycache__/** export-ignore
-*.py[cod] export-ignore
-.DS_Store export-ignore
-**/.DS_Store export-ignore

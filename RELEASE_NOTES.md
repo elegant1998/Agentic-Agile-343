@@ -1,12 +1,16 @@
 # 发布说明 · Release Notes
 
+## Unreleased
+
+- `skill_release.py publish` now synchronizes the public `Agentic-Agile-343` directory to contain only user-facing documents and the validated release ZIP; source code remains in `Agentic-Agile-343-Code`.
+
 > 🌐 English version: [RELEASE_NOTES.en.md](RELEASE_NOTES.en.md)
 
-# Agentic Agile 3-4-3 治理架构 · 开源版 v1.53.2
+# Agentic Agile 3-4-3 治理架构 · 开源版 v1.53.3
 
 > **先校准、再打怪。** 这是完整、可运行的 Agentic AI 研发治理框架——全部开源，无保留。让 AI 研发治理，进可攻退可守。
 
-- **版本**：`1.53.2`
+- **版本**：`1.53.3`
 - **发布日期**：2026-08-16
 - **许可证**：代码/模板 MIT · 白皮书 CC BY 4.0
 - **作者**：王立杰（无敌哥），AI 治理架构师
