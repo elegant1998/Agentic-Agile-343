@@ -3,7 +3,7 @@ name: agentic-agile-343
 description: "Agentic-Agile-343，让 AI 研发治理进可攻退可守。用户说既有项目先看看、风险评估或初始化治理、门禁误报、分析文件影响范围、本次只允许修改某些文件、没有测试先固定现有行为、修改已有功能、报告 Bug/缺陷/回归并要求修复、设计多层验证、生成证据包并完成任务，或准备发布、生成发布清单、检查制品和证据是否一致、记录已发布/回滚时使用。提供 3-4-3、Recon、安全变更、Verification Plan、Evidence 遥测收口、Release Manifest、TDD、证据与遥测闭环。Use for existing-project governance, safe changes, bug/regression repair, risk-driven verification, evidence-to-telemetry finalization, proof-carrying release readiness, artifact/evidence binding, and release/rollback fact recording."
 metadata:
   display_name: "Agentic Agile 343"
-  version: "1.53.1"
+  version: "1.53.2"
   author: "王立杰-无敌哥"
   created: "2025-07-20"
 ---
@@ -152,7 +152,7 @@ metadata:
 > python scripts/cli.py envelope check --task T-XXX --project-dir .
 > ```
 >
-> protected 优先于 allowed；Unknown、DRAFT、任务不匹配、路径穿越或 Git 不可用均 fail closed。没有正式围栏的项目保持既有 prove 行为。详见 **[references/task_recon.md](references/task_recon.md#change-envelope-机械门禁)**。
+> 围栏保存为 `governance/change/Change_Envelope_T-XXX.yaml`，只对绑定任务生效；全局历史文件不作为回退。protected 优先于 allowed；Unknown、DRAFT、任务不匹配、路径穿越或 Git 不可用均 fail closed。没有正式围栏的旧项目保持既有 prove 行为。详见 **[references/task_recon.md](references/task_recon.md#change-envelope-机械门禁)**。
 
 > **既有行为特征基线（v1.28.0）**：缺少可靠测试时，先规划并由 IO 确认 Preserve，再捕获修改前可重复行为，修改后复验：
 >
@@ -380,7 +380,7 @@ L1 意图图谱（OA 会话级）→ L2 全局约束（共享）→ L2+ AI 编�
 - **🔴 双地图 Context Provider（v1.37.0）**：Recon 可选使用 IWE Document Map、codebase-memory-mcp Code Map 与 343 Trace Link，按 L0/L1/L2/L3 披露实际能力。任何 Provider 缺失、未授权、过期、冲突或不兼容都必须回退并保留 Unknown；不得自动安装、联网、回写地图、升级静态关系为运行事实或扩大正式 Change Envelope。
 - **🔴 项目级地图默认增强（v1.38.0）**：Recon 默认优先消费项目内标准 Map artifact；缺失时仅对 CLI 可用 Provider 执行项目边界明确的持久化初始化。IWE 用项目内 `.iwe`，codebase-memory-mcp 使用 `index_repository --repo-path <PROJECT> --persistence true`。构建成功不等于已归一化或已形成 L3；Trace Link 必须有稳定 ID 和来源，语义猜测不得晋升 VERIFIED。失败回退 L0，禁止自动安装、全局配置写入、项目外持久化或权限升级。
 - **🔴 正式验证事实链（v1.39.0）**：`formal_verification` 是追加式事实源；`VERIFIED` 才计入完整完成，`CONDITIONAL` 必须有条件且不计完整完成，`BLOCKED` 不计完成。首次成功率只读取每个任务的首次正式验证结果，禁止用后续 VERIFIED 覆盖历史首次结果；`0/0` MUST 通过率为 NOT_APPLICABLE。
-- **🔴 Change Envelope 门禁（v1.27.1）**：存在正式 `governance/Change_Envelope.yaml` 时，prove 门必须检查 staged、unstaged、untracked、删除与 rename 的新旧路径。只有 task 匹配、状态 AUTHORIZED、allowed 非空且 Unknown 为空的围栏有效；protected 优先，任何越界或解析失败均阻断。禁止自动授权、自动扩围或提供跳过参数。
+- **🔴 Change Envelope 门禁（v1.27.1）**：存在正式 `governance/change/Change_Envelope_T-XXX.yaml` 时，prove 门必须检查 staged、unstaged、untracked、删除与 rename 的新旧路径。只有 task 匹配、状态 AUTHORIZED、allowed 非空且 Unknown 为空的围栏有效；全局历史文件不作为回退，protected 优先，任何越界或解析失败均阻断。禁止自动授权、自动扩围或提供跳过参数。
 - **🔴 Preserve 特征基线（v1.28.0）**：Agent 不得自动发明既有行为。只有 IO confirmed 或 existing test 来源、AUTHORIZED、Unknown 为空的基线可 capture；命令必须为参数数组且 shell=False。CAPTURED 基线存在时 prove 门强制复验，CHANGED/UNVERIFIABLE 均阻断；SAME 不替代新需求 AC。
 - **🔴 维护兼容修复（v1.28.1）**：`quick_telemetry.sh` 必须识别纯 unittest 项目的真实测试总数与通过数；新增 YAML 消费工具必须复用 `_bootstrap.ensure_yaml_available()`，不得在首次缺少 PyYAML 时破坏自包含承诺。
 - **🔴 安全变更统一入口（v1.29.0，v1.45.0 收口串联）**：`cli.py change` 仅负责编排现有能力，不得复制或弱化下层门禁。计划默认 dry-run、apply 不覆盖；状态必须从当前工件重算，不信任自报；禁止自动签署、自动授权围栏、自动决定 Preserve 或运行实现命令。`change verify` 在 Prove gate 通过后必须连续完成 `evidence finalize`、Intent Graph 反馈和 Closing Gate；若任一步失败必须 BLOCKED，全部成功才返回 CLOSED。

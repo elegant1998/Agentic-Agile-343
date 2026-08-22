@@ -171,7 +171,6 @@ def _profile_files(profile: str, recon: dict | None, risk: dict) -> dict[str, st
         base.update(
             {
                 "governance/recon/Recon_Baseline.md": render_recon(recon, "markdown") if recon else "# Recon Baseline\n",
-                "governance/Change_Envelope.yaml": "version: \"1.0\"\nallowed: []\nprotected: []\nunknown: []\n",
             }
         )
     elif profile == "multi-module":

@@ -327,11 +327,15 @@ def gate_prove(task_id, project_dir):
         all_pass &= check("TypeScript 编译通过", rc == 0,
                           detail)
 
-    # 5. 已存在正式 Change Envelope 时，实际 Git 变更不得越界。
-    # 没有围栏的项目保持既有行为；DRAFT/无效/Unknown 围栏由检查器 fail closed。
-    envelope = project_dir / "governance" / "Change_Envelope.yaml"
-    if envelope.exists():
-        from change_envelope import check_envelope
+    # 5. 任务专属 Change Envelope 存在时，实际 Git 变更不得越界。
+    # 没有围栏的旧项目保持既有行为；全局历史文件不构成任务围栏。
+    from change_envelope import check_envelope, find_task_envelope
+    try:
+        envelope = find_task_envelope(project_dir, task_id)
+    except ValueError as exc:
+        all_pass &= check("Change Envelope（AMBIGUOUS）", False, str(exc))
+        envelope = None
+    if envelope is not None:
         envelope_result = check_envelope(project_dir, task_id, envelope)
         detail = "; ".join(envelope_result.get("errors", []))
         if not detail and not envelope_result["passed"]:

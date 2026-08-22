@@ -1,3 +1,4 @@
+# 保存为 governance/change/Change_Envelope_<TASK>.yaml；每份围栏只绑定一个任务。
 version: "1.1"
 task_id: T-XXX
 status: PENDING  # PENDING | AUTHORIZED；只有 IO 确认后才可改为 AUTHORIZED

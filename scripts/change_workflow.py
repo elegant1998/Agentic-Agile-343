@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from task_recon import scan_task
 from gate_check import check_signed
-from change_envelope import _load as load_envelope
+from change_envelope import _load as load_envelope, load_structured_object, resolve_task_envelope
 from evidence_workflow import finalize_evidence
 from telemetry_tracker import append_formal_verification
 from telemetry_workflow import capture_context_measurement, capture_token_baseline
@@ -25,17 +25,15 @@ def apply_plan(project_dir,plan):
 def _load_plan(project,task):
     path=_plan_path(project,task)
     if not path.exists(): return None
-    try:return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:return None
+    return load_structured_object(path, "Change Plan")
 def _contract(project,task):
     try:
         contract=find_contract(Path(project).resolve(),task)
         return bool(contract and check_signed(contract.read_text(encoding="utf-8"))[0])
     except Exception:return False
 def _envelope_authorized(project,task):
-    path=Path(project)/"governance/Change_Envelope.yaml"
-    if not path.exists():return False
     try:
+        path=resolve_task_envelope(project,task)
         d=load_envelope(path);return d.get("task_id")==task and d.get("status")=="AUTHORIZED" and bool((d.get("allowed") or {}).get("paths")) and not d.get("unknown")
     except Exception:return False
 def _baseline_captured(project,task):
@@ -101,11 +99,15 @@ def _validate_preparation(project,task):
 def _result(state,next_action,command,**extra):
     return {"state":state,"next_action":next_action,"recommended_command":command,**extra}
 def workflow_status(project_dir,task_id):
-    project=Path(project_dir).resolve();plan=_load_plan(project,task_id)
+    project=Path(project_dir).resolve()
+    try:plan=_load_plan(project,task_id)
+    except ValueError as exc:return _result("BLOCKED","repair Change Plan",f"repair governance/change/Change_Plan_{task_id}.yaml",evidence=str(exc),failed_gate="plan")
     if not plan:return _result("UNPLANNED","change plan",f"python scripts/cli.py change plan --task {task_id} --target <file> --project-dir .")
+    if str(plan.get("task_id") or "").casefold()!=str(task_id).casefold():
+        return _result("BLOCKED","repair Change Plan",f"repair governance/change/Change_Plan_{task_id}.yaml",evidence="Change Plan task_id does not match requested task",failed_gate="plan")
     if not _contract(project,task_id):return _result("WAITING_FOR_CONTRACT","sign contract",f"review and sign governance/contracts/*{task_id}*")
     if plan.get("recon",{}).get("unknown") and (plan.get("unknown_decision") or {}).get("status")!="ACCEPTED":return _result("WAITING_FOR_UNKNOWN","resolve Recon Unknown",f"record accepted Unknown in signed contract and Change Plan {task_id}")
-    if not _envelope_authorized(project,task_id):return _result("WAITING_FOR_ENVELOPE","authorize Change Envelope",f"review governance/Change_Envelope.yaml for {task_id}")
+    if not _envelope_authorized(project,task_id):return _result("WAITING_FOR_ENVELOPE","authorize Change Envelope",f"review governance/change/Change_Envelope_{task_id}.yaml")
     if plan.get("baseline_required") and not _baseline_captured(project,task_id):return _result("WAITING_FOR_BASELINE","capture Preserve baseline",f"python scripts/cli.py characterize capture --task {task_id} --project-dir .")
     if not plan.get("baseline_required") and not plan.get("recon",{}).get("candidates") and not (plan.get("baseline_not_required") or {}).get("accepted"):return _result("WAITING_FOR_BASELINE","justify baseline decision",f"record baseline_not_required evidence for {task_id}")
     return _result("READY_FOR_ORCHESTRATE","change prepare",f"python scripts/cli.py change prepare --task {task_id} --project-dir .")

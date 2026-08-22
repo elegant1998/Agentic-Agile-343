@@ -14,11 +14,12 @@ from typing import Any
 IGNORED_PREFIXES = ("governance/evidence/", "governance/telemetry/")
 
 
-def _load(path: Path) -> dict[str, Any]:
+def load_structured_object(path: Path | str, label: str = "structured file") -> dict[str, Any]:
+    path = Path(path)
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
-        raise ValueError(f"Change Envelope not readable: {path}") from exc
+        raise ValueError(f"{label} not readable: {path}") from exc
     # 提取 frontmatter（--- 包裹的 YAML 块）
     if text.lstrip().startswith("---"):
         parts = text.split("---", 2)
@@ -36,10 +37,40 @@ def _load(path: Path) -> dict[str, Any]:
         try:
             data = yaml.safe_load(text)
         except Exception as exc:
-            raise ValueError(f"Change Envelope is not valid YAML/JSON: {path}") from exc
+            raise ValueError(f"{label} is not valid YAML/JSON: {path}") from exc
     if not isinstance(data, dict):
-        raise ValueError("Change Envelope root must be an object")
+        raise ValueError(f"{label} root must be an object")
     return data
+
+
+def _load(path: Path) -> dict[str, Any]:
+    return load_structured_object(path, "Change Envelope")
+
+
+def find_task_envelope(project_dir: Path | str, task_id: str) -> Path | None:
+    """Return the unique task-local envelope, never a legacy global envelope."""
+    project = Path(project_dir).expanduser().resolve()
+    change_dir = project / "governance" / "change"
+    if not change_dir.is_dir():
+        return None
+    expected = f"Change_Envelope_{str(task_id).strip()}".casefold()
+    candidates = sorted(
+        path for path in change_dir.iterdir()
+        if path.is_file()
+        and path.suffix.casefold() in {".yaml", ".yml"}
+        and path.stem.casefold() == expected
+    )
+    if len(candidates) > 1:
+        names = ", ".join(path.name for path in candidates)
+        raise ValueError(f"TASK_ENVELOPE_AMBIGUOUS: {task_id}: {names}")
+    return candidates[0] if candidates else None
+
+
+def resolve_task_envelope(project_dir: Path | str, task_id: str) -> Path:
+    envelope = find_task_envelope(project_dir, task_id)
+    if envelope is None:
+        raise ValueError(f"TASK_ENVELOPE_MISSING: governance/change/Change_Envelope_{task_id}.yaml")
+    return envelope
 
 
 def _paths(value: Any, field: str) -> list[str]:
@@ -103,10 +134,10 @@ def check_envelope(project_dir: Path | str, task_id: str, envelope_path: Path | 
     project = Path(project_dir).expanduser().resolve()
     if not project.is_dir():
         return _failure(task_id, "INVALID_PROJECT", f"project directory does not exist: {project}")
-    envelope = Path(envelope_path).expanduser() if envelope_path else project / "governance" / "Change_Envelope.yaml"
-    if not envelope.is_absolute():
-        envelope = (project / envelope).resolve()
     try:
+        envelope = Path(envelope_path).expanduser() if envelope_path else resolve_task_envelope(project, task_id)
+        if not envelope.is_absolute():
+            envelope = (project / envelope).resolve()
         data = _load(envelope)
         if data.get("task_id") != task_id:
             raise ValueError(f"task_id mismatch: expected {task_id}")
