@@ -11,6 +11,12 @@ Agentic Agile 3-4-3 是一套面向 Agentic AI 研发的治理 Skill，帮助团
 - 作者：王立杰（无敌哥）
 - 发布说明：[`RELEASE_NOTES.md`](RELEASE_NOTES.md)（[English](RELEASE_NOTES.en.md)）
 
+
+
+<video src="./pic/343-e2e.mp4" controls width="700"></video>
+
+
+
 ## 下载与安装
 
 所有 release ZIP 都在 [`download/`](download/) 目录。下载最新的
