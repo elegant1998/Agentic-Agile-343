@@ -23,6 +23,24 @@ from pathlib import Path
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 
+
+def configure_utf8_console() -> None:
+    """Keep public CLI output usable on legacy Windows code pages.
+
+    GitHub's Windows runners may expose cp1252 even though this dispatcher
+    contains Chinese help and error text.  Reconfigure the current streams and
+    pass the same UTF-8 contract to Python child commands launched below.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="backslashreplace")
+            except (OSError, ValueError):
+                pass
+    os.environ["PYTHONIOENCODING"] = "utf-8"
+
+
 # 子命令 → (脚本文件, 说明)
 COMMANDS = {
     # ── Harness 引擎 ──
@@ -89,6 +107,7 @@ SUBCOMMAND_MAP = {
 
 
 def main():
+    configure_utf8_console()
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help", "list", "help"):
         print("Agentic Agile 3-4-3 统一 CLI\n")
         print("用法: python scripts/cli.py <subcommand> [args...]\n")
